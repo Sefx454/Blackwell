@@ -1,4275 +1,7062 @@
-"""PROJECT-SWARMFALL — field-engineer core defense.
-Python 3.10+ / Tkinter only. No image files or third-party packages needed.
-"""
+# Blackwell V9
 from __future__ import annotations
-import math
-import random
-import heapq
-import time
+import base64
+import dataclasses
 import json
-from pathlib import Path
-from collections import deque, defaultdict
-from dataclasses import dataclass, field
+import heapq
+import math
+import os
+import random
+import sys
+import time
+import textwrap
 import tkinter as tk
+from tkinter import messagebox
+from collections import defaultdict, OrderedDict
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Callable, Optional, Any
 
-MAP_NAMES = ('Verdant Basin', 'Amber Pass', 'Bluewater Station')
+try:
+    from PIL import Image, ImageDraw, ImageFont, ImageTk, ImageEnhance
+except ImportError as exc:
+    raise SystemExit(
+        "Pillow is needed for the custom pixel-art renderer. "
+        "Install it with: python3 -m pip install pillow"
+    ) from exc
 
-MAP_NOTES = ('Open fields, stone outcrops, room to expand.', 'Rocky corridors reward clever walls and gates.', 'Water divides your base into connected districts.')
+VERSION = "9"
+SW, SH = 1440, 900
+VIEW_X, VIEW_Y = 27, 89
+VIEW_W, VIEW_H = 996, 690
+PIXEL_SCALE = 3
+WORLD_W, WORLD_H = 548, 374
+VISIBLE_W = VIEW_W / PIXEL_SCALE
+VISIBLE_H = VIEW_H / PIXEL_SCALE
+STEP_INTERVAL = 1 / 30
+SAVE_FILE = Path.home() / ".blackwell_ten_shadows_v3_save.json"
+OLD_SAVE_FILE = Path.home() / ".blackwell_ten_shadows_save.json"
 
-COLORS = dict(bg='#101f31', panel='#192c40', card='#22394e', line='#35536a', text='#edf5f6', muted='#a5becd', blue='#63c8ec', green='#85dfab', gold='#ffd580', red='#ff917f', purple='#bea6f4')
+
+C = {
+    "black": "#060e19",
+    "midnight": "#071424",
+    "panel": "#0c1b30",
+    "panel_high": "#132943",
+    "panel_light": "#1b3650",
+    "edge": "#45627e",
+    "thin": "#243d58",
+    "gold": "#ddb56b",
+    "gold_dim": "#9f835d",
+    "ivory": "#f2e6ce",
+    "muted": "#9eb1c3",
+    "cyan": "#88cddc",
+    "red": "#d27979",
+    "green": "#80ba96",
+    "paper": "#d8c29c",
+    "ink": "#392b27",
+    "pale": "#e7d3af",
+    "warm": "#e5ae5c",
+    "lamp": "#e8bc72",
+    "earth": "#4b352e",
+    "shadow": "#111622",
+}
+
+
+def clamp(v, lo, hi):
+    return max(lo, min(hi, v))
+
+
+def lerp(a, b, alpha):
+    return a + (b - a) * alpha
+
+
+def length(x, y):
+    return math.hypot(x, y)
+
+
+def unit(x, y):
+    d = math.hypot(x, y)
+    return (x / d, y / d) if d > 0.00001 else (0.0, 0.0)
+
 
 def distance(a, b):
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
-ROBOTS = [{'name': 'Ranger',
-  'price': 100,
-  'metal': 22,
-  'circuits': 4,
-  'crystal': 0,
-  'color': '#72c9e8',
-  'chassis': 'humanoid',
-  'role': 'rifle',
-  'range': 4.2,
-  'damage': 19,
-  'cooldown': 0.65,
-  'power': 1,
-  'hp': 300,
-  'paths': (('Precision',
-             [{'name': 'Calibrated sights',
-               'price': 85,
-               'description': '+25% range; target armored bugs.',
-               'effects': {'range': 1.25, 'priority': 1}},
-              {'name': 'Armor-break rounds',
-               'price': 210,
-               'description': 'Shots ignore armor and mark targets.',
-               'effects': {'pierce_armor': 1, 'mark': 1}},
-              {'name': 'Overwatch burst',
-               'price': 480,
-               'description': 'Three shots per trigger; +35% damage.',
-               'effects': {'burst': 3, 'damage': 1.35}}]),
-            ('Rapid response',
-             [{'name': 'Quick loader',
-               'price': 80,
-               'description': 'Fire 25% faster.',
-               'effects': {'rate': 1.25}},
-              {'name': 'Twin receivers',
-               'price': 195,
-               'description': 'Fire two bullets per trigger.',
-               'effects': {'burst': 2}},
-              {'name': 'Swarm sweeper',
-               'price': 460,
-               'description': 'Defeated targets trigger small explosions.',
-               'effects': {'death_blast': 1, 'rate': 1.3}}]))},
- {'name': 'Bulwark',
-  'price': 180,
-  'metal': 38,
-  'circuits': 6,
-  'crystal': 0,
-  'color': '#e5bd7e',
-  'chassis': 'heavy',
-  'role': 'heavy',
-  'range': 3.8,
-  'damage': 10,
-  'cooldown': 0.18,
-  'power': 2,
-  'hp': 300,
-  'paths': (('Suppression',
-             [{'name': 'Belt feed',
-               'price': 100,
-               'description': '+25% firing speed.',
-               'effects': {'rate': 1.25}},
-              {'name': 'Pinning fire',
-               'price': 240,
-               'description': 'Bullets slow targets.',
-               'effects': {'slow': 0.72}},
-              {'name': 'Rotary storm',
-               'price': 540,
-               'description': 'Twin shots and much faster barrels.',
-               'effects': {'burst': 2, 'rate': 1.45}}]),
-            ('Bunker',
-             [{'name': 'Reinforced frame',
-               'price': 90,
-               'description': 'Double structural health.',
-               'effects': {'hp': 2}},
-              {'name': 'Guard plating',
-               'price': 220,
-               'description': 'Nearby buildings take 30% less damage.',
-               'effects': {'guard': 1}},
-              {'name': 'Bastion rounds',
-               'price': 500,
-               'description': 'Triple damage and improved range.',
-               'effects': {'damage': 3, 'range': 1.2}}]))},
- {'name': 'Longshot',
-  'price': 200,
-  'metal': 26,
-  'circuits': 10,
-  'crystal': 0,
-  'color': '#c3adf2',
-  'chassis': 'humanoid',
-  'role': 'sniper',
-  'range': 7.0,
-  'damage': 100,
-  'cooldown': 2.1,
-  'power': 2,
-  'hp': 300,
-  'paths': (('Hunter',
-             [{'name': 'Long lens',
-               'price': 120,
-               'description': '+25% range.',
-               'effects': {'range': 1.25}},
-              {'name': 'Carapace breaker',
-               'price': 270,
-               'description': 'Ignore armor; +60% damage.',
-               'effects': {'pierce_armor': 1, 'damage': 1.6}},
-              {'name': 'Colossus hunter',
-               'price': 650,
-               'description': 'Deals triple damage to elite and boss bugs.',
-               'effects': {'boss_bonus': 3}}]),
-            ('Spotter',
-             [{'name': 'Target beacon',
-               'price': 110,
-               'description': 'Hit bugs take 20% extra damage.',
-               'effects': {'mark': 1}},
-              {'name': 'Tracking scope',
-               'price': 250,
-               'description': 'Fires 60% faster.',
-               'effects': {'rate': 1.6}},
-              {'name': 'Linked shot',
-               'price': 560,
-               'description': 'Shots ricochet to two nearby targets.',
-               'effects': {'chain': 2}}]))},
- {'name': 'Ember Tank',
-  'price': 190,
-  'metal': 40,
-  'circuits': 7,
-  'crystal': 0,
-  'color': '#ffab79',
-  'chassis': 'tank',
-  'role': 'flame',
-  'range': 3.0,
-  'damage': 16,
-  'cooldown': 0.3,
-  'power': 2,
-  'hp': 300,
-  'paths': (('Inferno',
-             [{'name': 'Hot mix',
-               'price': 110,
-               'description': '+35% damage.',
-               'effects': {'damage': 1.35}},
-              {'name': 'Lingering fire',
-               'price': 260,
-               'description': 'Flames burn enemies over time.',
-               'effects': {'burn': 12}},
-              {'name': 'Firestorm',
-               'price': 590,
-               'description': 'Wider cone; doubled burning damage.',
-               'effects': {'splash': 1.6, 'burn': 24, 'damage': 1.3}}]),
-            ('Pressure',
-             [{'name': 'Long nozzle',
-               'price': 100,
-               'description': '+30% range.',
-               'effects': {'range': 1.3}},
-              {'name': 'Pressure jet',
-               'price': 240,
-               'description': 'Scorches armor and slows targets.',
-               'effects': {'mark': 1, 'slow': 0.8}},
-              {'name': 'Flash ignition',
-               'price': 540,
-               'description': 'Attacks ignite a large blast at the target.',
-               'effects': {'explosion': 1.6, 'damage': 1.65}}]))},
- {'name': 'Rocket Rover',
-  'price': 210,
-  'metal': 32,
-  'circuits': 10,
-  'crystal': 0,
-  'color': '#9bdbad',
-  'chassis': 'rover',
-  'role': 'rocket',
-  'range': 5.0,
-  'damage': 65,
-  'cooldown': 1.8,
-  'power': 2,
-  'hp': 300,
-  'paths': (('Demolition',
-             [{'name': 'Bigger warheads',
-               'price': 120,
-               'description': '+40% blast radius.',
-               'effects': {'splash': 1.4}},
-              {'name': 'Shaped charge',
-               'price': 290,
-               'description': 'Ignore armor; +35% damage.',
-               'effects': {'pierce_armor': 1, 'damage': 1.35}},
-              {'name': 'Cluster payload',
-               'price': 650,
-               'description': 'Each rocket releases three secondary blasts.',
-               'effects': {'cluster': 3}}]),
-            ('Guidance',
-             [{'name': 'Targeting radar',
-               'price': 110,
-               'description': '+25% range; rockets hit flying bugs harder.',
-               'effects': {'range': 1.25, 'air_bonus': 1.4}},
-              {'name': 'Dual launchers',
-               'price': 270,
-               'description': 'Launch two rockets at once.',
-               'effects': {'burst': 2}},
-              {'name': 'Rapid salvo',
-               'price': 620,
-               'description': 'Fires twice as fast.',
-               'effects': {'rate': 2}}]))},
- {'name': 'Atlas Mortar',
-  'price': 235,
-  'metal': 42,
-  'circuits': 10,
-  'crystal': 0,
-  'color': '#e5a5a8',
-  'chassis': 'rig',
-  'role': 'mortar',
-  'range': 7.0,
-  'damage': 95,
-  'cooldown': 2.8,
-  'power': 3,
-  'hp': 300,
-  'paths': (('Siege',
-             [{'name': 'Heavy shell',
-               'price': 140,
-               'description': '+40% damage.',
-               'effects': {'damage': 1.4}},
-              {'name': 'Seismic impact',
-               'price': 320,
-               'description': 'Blasts briefly stun ground bugs.',
-               'effects': {'stun': 0.8}},
-              {'name': 'Crater maker',
-               'price': 740,
-               'description': 'Huge splash and +80% damage.',
-               'effects': {'splash': 1.7, 'damage': 1.8}}]),
-            ('Barrage',
-             [{'name': 'Extended barrel',
-               'price': 125,
-               'description': '+25% range.',
-               'effects': {'range': 1.25}},
-              {'name': 'Double drop',
-               'price': 295,
-               'description': 'Two shells per volley.',
-               'effects': {'burst': 2}},
-              {'name': 'Rolling thunder',
-               'price': 680,
-               'description': 'Explosions leave damaging ground zones.',
-               'effects': {'hazard': 24, 'rate': 1.4}}]))},
- {'name': 'Frost Crawler',
-  'price': 155,
-  'metal': 24,
-  'circuits': 8,
-  'crystal': 0,
-  'color': '#8edeea',
-  'chassis': 'crawler',
-  'role': 'cryo',
-  'range': 3.8,
-  'damage': 10,
-  'cooldown': 0.85,
-  'power': 2,
-  'hp': 300,
-  'paths': (('Deep freeze',
-             [{'name': 'Cold front',
-               'price': 90,
-               'description': 'Stronger slowing mist.',
-               'effects': {'slow': 0.52}},
-              {'name': 'Ice lock',
-               'price': 225,
-               'description': 'Hits briefly freeze targets.',
-               'effects': {'stun': 0.4}},
-              {'name': 'Absolute chill',
-               'price': 540,
-               'description': 'Longer freeze and brittle armor.',
-               'effects': {'stun': 0.85, 'mark': 1}}]),
-            ('Mist network',
-             [{'name': 'Wide diffuser',
-               'price': 85,
-               'description': '+30% range.',
-               'effects': {'range': 1.3}},
-              {'name': 'Dense cloud',
-               'price': 210,
-               'description': 'Doubles affected area.',
-               'effects': {'splash': 2}},
-              {'name': 'Glacial pulse',
-               'price': 490,
-               'description': 'Much faster pulses; improved damage.',
-               'effects': {'rate': 1.8, 'damage': 3}}]))},
- {'name': 'Rail Strider',
-  'price': 280,
-  'metal': 38,
-  'circuits': 16,
-  'crystal': 0,
-  'color': '#b1c6df',
-  'chassis': 'walker',
-  'role': 'rail',
-  'range': 6.0,
-  'damage': 110,
-  'cooldown': 2.1,
-  'power': 3,
-  'hp': 300,
-  'paths': (('Penetrator',
-             [{'name': 'Charged coils',
-               'price': 160,
-               'description': '+35% damage.',
-               'effects': {'damage': 1.35}},
-              {'name': 'Hypervelocity',
-               'price': 370,
-               'description': 'Wider piercing beam; ignore armor.',
-               'effects': {'beam_width': 0.7, 'pierce_armor': 1}},
-              {'name': 'Titan lance',
-               'price': 850,
-               'description': 'Triple damage against elites and bosses.',
-               'effects': {'boss_bonus': 3, 'damage': 1.3}}]),
-            ('Capacitor',
-             [{'name': 'Fast recharge',
-               'price': 145,
-               'description': '+30% fire rate.',
-               'effects': {'rate': 1.3}},
-              {'name': 'Split discharge',
-               'price': 340,
-               'description': 'A second beam seeks another target.',
-               'effects': {'burst': 2}},
-              {'name': 'Aftershock',
-               'price': 780,
-               'description': 'Beam ends in a stunning explosion.',
-               'effects': {'explosion': 1.5, 'stun': 0.65}}]))},
- {'name': 'Skyguard',
-  'price': 145,
-  'metal': 24,
-  'circuits': 8,
-  'crystal': 0,
-  'color': '#f4d77c',
-  'chassis': 'rover',
-  'role': 'air',
-  'range': 6.0,
-  'damage': 34,
-  'cooldown': 0.6,
-  'power': 1,
-  'hp': 300,
-  'paths': (('Interceptor',
-             [{'name': 'Radar array',
-               'price': 90,
-               'description': '+30% range.',
-               'effects': {'range': 1.3}},
-              {'name': 'Flak rounds',
-               'price': 220,
-               'description': 'Shots explode among flying insects.',
-               'effects': {'explosion': 1.1}},
-              {'name': 'Air superiority',
-               'price': 520,
-               'description': 'Triple anti-air damage.',
-               'effects': {'damage': 3}}]),
-            ('Multirole',
-             [{'name': 'Ground targeting',
-               'price': 85,
-               'description': 'Can also attack ground insects.',
-               'effects': {'ground': 1}},
-              {'name': 'Tracking burst',
-               'price': 210,
-               'description': 'Fires two shots per trigger.',
-               'effects': {'burst': 2}},
-              {'name': 'Storm battery',
-               'price': 490,
-               'description': 'Faster shots that stun briefly.',
-               'effects': {'rate': 1.8, 'stun': 0.3}}]))},
- {'name': 'Patch Rover',
-  'price': 145,
-  'metal': 24,
-  'circuits': 10,
-  'crystal': 0,
-  'color': '#82dfa9',
-  'chassis': 'rover',
-  'role': 'repair',
-  'range': 3.4,
-  'damage': 0,
-  'cooldown': 1.0,
-  'power': 1,
-  'hp': 300,
-  'paths': (('Mechanic',
-             [{'name': 'Precision tools',
-               'price': 90,
-               'description': '+60% repair strength.',
-               'effects': {'heal': 1.6}},
-              {'name': 'Repair network',
-               'price': 225,
-               'description': 'Repair up to three buildings at once.',
-               'effects': {'heal_targets': 3}},
-              {'name': 'Reconstruction',
-               'price': 550,
-               'description': 'Repairs add temporary protective shields.',
-               'effects': {'shield': 1, 'heal': 1.5}}]),
-            ('Field support',
-             [{'name': 'Long cable',
-               'price': 85,
-               'description': '+35% repair range.',
-               'effects': {'range': 1.35}},
-              {'name': 'Core specialist',
-               'price': 210,
-               'description': 'Much stronger repairs on the core.',
-               'effects': {'core_heal': 3}},
-              {'name': 'Service station',
-               'price': 500,
-               'description': 'Nearby robots fire 20% faster.',
-               'effects': {'support_rate': 1.2}}]))},
- {'name': 'Marshal',
-  'price': 225,
-  'metal': 32,
-  'circuits': 16,
-  'crystal': 0,
-  'color': '#83aef0',
-  'chassis': 'heavy',
-  'role': 'command',
-  'range': 4.0,
-  'damage': 18,
-  'cooldown': 1.0,
-  'power': 2,
-  'hp': 300,
-  'paths': (('Tactics',
-             [{'name': 'Battle uplink',
-               'price': 125,
-               'description': 'Nearby weapons gain 10% more firing speed.',
-               'effects': {'aura_rate': 1.1}},
-              {'name': 'Range telemetry',
-               'price': 290,
-               'description': 'Nearby weapons gain 20% range.',
-               'effects': {'aura_range': 1.2}},
-              {'name': 'Coordinated assault',
-               'price': 700,
-               'description': 'Nearby weapons deal 35% more damage.',
-               'effects': {'aura_damage': 1.35}}]),
-            ('Logistics',
-             [{'name': 'Wideband antenna',
-               'price': 115,
-               'description': '+35% command radius.',
-               'effects': {'range': 1.35}},
-              {'name': 'Salvage protocol',
-               'price': 270,
-               'description': 'Kills in range give 40% more dollars.',
-               'effects': {'bounty': 1.4}},
-              {'name': 'Emergency shielding',
-               'price': 640,
-               'description': 'Allies in range receive protective shields.',
-               'effects': {'shield': 1}}]))},
- {'name': 'Scatter Mech',
-  'price': 140,
-  'metal': 28,
-  'circuits': 5,
-  'crystal': 0,
-  'color': '#e9a0ce',
-  'chassis': 'humanoid',
-  'role': 'scatter',
-  'range': 2.9,
-  'damage': 15,
-  'cooldown': 0.95,
-  'power': 1,
-  'hp': 300,
-  'paths': (('Breach',
-             [{'name': 'Dense pellets',
-               'price': 90,
-               'description': '+35% pellet damage.',
-               'effects': {'damage': 1.35}},
-              {'name': 'Slug spread',
-               'price': 220,
-               'description': 'Ignore armor and fire two extra pellets.',
-               'effects': {'pierce_armor': 1, 'pellets': 7}},
-              {'name': 'Point blank',
-               'price': 530,
-               'description': 'Double damage; hits briefly stun.',
-               'effects': {'damage': 2, 'stun': 0.25}}]),
-            ('Crowd control',
-             [{'name': 'Wide choke',
-               'price': 85,
-               'description': '+20% range and wider spread.',
-               'effects': {'range': 1.2, 'cone': 1.5}},
-              {'name': 'Concussion shot',
-               'price': 210,
-               'description': 'Pellets slow enemies.',
-               'effects': {'slow': 0.62}},
-              {'name': 'Volley engine',
-               'price': 500,
-               'description': 'Double firing speed; nine pellets.',
-               'effects': {'rate': 2, 'pellets': 9}}]))}]
 
-STRUCTURES = [{'name': 'Wall',
-  'price': 12,
-  'metal': 12,
-  'circuits': 0,
-  'crystal': 0,
-  'color': '#adbac8',
-  'role': 'wall',
-  'hp': 850,
-  'power': 0},
- {'name': 'Gate',
-  'price': 30,
-  'metal': 20,
-  'circuits': 2,
-  'crystal': 0,
-  'color': '#e7c78d',
-  'role': 'gate',
-  'hp': 700,
-  'power': 0},
- {'name': 'Relay Generator',
-  'price': 100,
-  'metal': 34,
-  'circuits': 10,
-  'crystal': 0,
-  'color': '#91dcd8',
-  'role': 'generator',
-  'hp': 450,
-  'power': 0},
- {'name': 'Mining Rig',
-  'price': 100,
-  'metal': 28,
-  'circuits': 8,
-  'crystal': 0,
-  'color': '#e6be75',
-  'role': 'mine',
-  'hp': 380,
-  'power': 1},
- {'name': 'Shield Pylon',
-  'price': 180,
-  'metal': 35,
-  'circuits': 14,
-  'crystal': 5,
-  'color': '#b7a0ee',
-  'role': 'shield',
-  'hp': 450,
-  'power': 3}]
+def roman(n):
+    return ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"][n]
 
-SPECS = ROBOTS + STRUCTURES
 
-BUGS = {'Ant': (55, 1.15, 9, 9, '#915c3c', 'bite', 18, 0.9),
- 'Beetle': (210, 0.67, 17, 13, '#447561', 'ram', 45, 1.0),
- 'Termite': (85, 1.0, 12, 10, '#d7b982', 'chew', 24, 1.0),
- 'Cockroach': (110, 1.65, 14, 11, '#a57b50', 'scuttle', 18, 0.95),
- 'Wasp': (105, 1.4, 17, 11, '#efd16a', 'sting', 26, 1.1),
- 'Grasshopper': (170, 1.1, 21, 13, '#91ba65', 'leap', 30, 1.0),
- 'Mantis': (280, 0.95, 28, 15, '#74a96a', 'slash', 48, 1.5),
- 'Moth': (180, 1.0, 23, 14, '#c2b397', 'dust', 10, 3.2),
- 'Stag Beetle': (650, 0.6, 40, 18, '#675b4d', 'crush', 70, 1.2),
- 'Dragonfly': (200, 1.9, 27, 13, '#6dbfc5', 'dive', 35, 1.2),
- 'Ladybug': (350, 0.78, 30, 14, '#e77e69', 'shell', 30, 1.1),
- 'Bombardier Beetle': (410, 0.75, 36, 15, '#b1966e', 'spray', 24, 3.6),
- 'Goliath Beetle': (36000, 0.34, 1600, 34, '#857b68', 'boss', 150, 1.4)}
+def wrapped(s: str, width=68):
+    return textwrap.fill(s, width=width, replace_whitespace=False)
 
-FLIERS = {'Wasp', 'Moth', 'Dragonfly'}
+
+def hex2rgb(s: str):
+    return tuple(int(s[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def light(c, amount=0.2):
+    rgb = hex2rgb(c) if isinstance(c, str) and c.startswith("#") else c
+    return tuple(clamp(int(v + amount * 255), 0, 255) for v in rgb)
+
+
+def shade(c, amt):
+    rgb = hex2rgb(c) if isinstance(c, str) and c.startswith("#") else c
+    return tuple(clamp(int(v * amt), 0, 255) for v in rgb)
+
 
 @dataclass
-class Building:
-    x: int
-    y: int
-    kind: int
-    hp: float = 0
-    paths: list = field(default_factory=lambda: [0, 0])
-    cooldown: float = 0
-    invested: int = 0
-    opened: bool = False
-    angle: float = -0.8
-    shield: float = 0
-    jam: float = 0
-    animation: float = 0
-
-    def __post_init__(self):
-        self.hp = self.stats()['hp']
-        self.invested = self.spec['price']
-
-    @property
-    def spec(self):
-        return SPECS[self.kind]
-
-    @property
-    def role(self):
-        return self.spec['role']
-
-    @property
-    def pos(self):
-        return (self.x + 0.5, self.y + 0.5)
-
-    def stats(self):
-        s = dict(range=self.spec.get('range', 0), damage=self.spec.get('damage', 0), rate=1.0, hp=self.spec['hp'], burst=1, splash=1.0, slow=0.7 if self.role == 'cryo' else 1.0, heal=1.0, heal_targets=1, core_heal=1.0, aura_rate=1.15, aura_range=1.0, aura_damage=1.0, bounty=1.0, pellets=5, cone=1.0, beam_width=0.32, air_bonus=1.0, boss_bonus=1.0, burn=0.0, stun=0.0, mark=0.0, ground=0, shield=0, pierce_armor=0, death_blast=0, chain=0, explosion=0, cluster=0, hazard=0, support_rate=1.0)
-        for path, tier in enumerate(self.paths):
-            if not tier:
-                continue
-            for u in self.spec.get('paths', ())[path][1][:tier]:
-                for key, value in u['effects'].items():
-                    if key in ('range', 'damage', 'rate', 'hp', 'heal', 'core_heal', 'splash', 'aura_rate'):
-                        s[key] *= value
-                    else:
-                        s[key] = value
-        return s
-
-    def next_upgrade(self, path):
-        if self.kind >= len(ROBOTS) or self.paths[path] >= 3:
-            return None
-        return self.spec['paths'][path][1][self.paths[path]]
-
-    def upgrade_locked(self, path):
-        return self.paths[path] >= 3 or (self.paths[1 - path] >= 2 and self.paths[path] >= 1)
-
-@dataclass
-class Enemy:
+class Item:
+    id: str
     name: str
     x: float
     y: float
-    wave: int
-    hp: float = 0
-    maxhp: float = 0
-    angle: float = 0
-    timer: float = 1
-    ability: float = 4
-    slow: float = 1
-    slow_time: float = 0
-    stun: float = 0
-    burn: float = 0
-    burn_time: float = 0
-    marked: float = 0
-    dead: bool = False
-    waypoint: tuple | None = None
-    nav_version: int = -1
-    last_source: Building | None = None
-
-    def __post_init__(self):
-        scale = 1 + 0.095 * (self.wave - 1) + 0.002 * (self.wave - 1) ** 2
-        self.hp = self.maxhp = BUGS[self.name][0] * (1 if self.name == 'Goliath Beetle' else scale)
-
-    @property
-    def pos(self):
-        return (self.x, self.y)
-
-    @property
-    def flying(self):
-        return self.name in FLIERS
-
-    @property
-    def role(self):
-        return BUGS[self.name][5]
-
-class World:
-    """Game simulation independent of Tk, so it can be tested without a window."""
-
-    def __init__(self, mapid=0):
-        self.mapid = mapid
-        self.rng = random.Random(920 + mapid)
-        self.core = (14, 11)
-        self.corepos = (14.5, 11.5)
-        self.corehp = self.coremax = 4500
-        self.money = 1250
-        self.materials = dict(metal=300, circuits=80, crystal=12)
-        self.buildings = {}
-        self.enemies = []
-        self.projectiles = []
-        self.effects = []
-        self.hazards = []
-        self.terrain = set()
-        self.deposits = {}
-        self.spawns = [(0, 4), (27, 17), (13, 0), (13, 21)]
-        self.wave = 0
-        self.queue = deque()
-        self.spawn_timer = 0
-        self.active = False
-        self.autoplay = False
-        self.intermission = 8.0
-        self.outcome = ''
-        self.kills = 0
-        self.elapsed = 0
-        self.message = 'Choose defenses, gather materials, then launch wave 1.'
-        self.message_time = 10
-        self.shake = 0
-        self.nav_version = 0
-        self.mine_timer = 0
-        self.harvest_timer = 0
-        self.generate_map()
-        self.repath()
-
-    def generate_map(self):
-        for y in range(NY):
-            for x in range(NX):
-                blocked = x in (8, 9) and 3 <= y <= 7 or (19 <= x <= 22 and y in (15, 16)) if self.mapid == 0 else x in (7, 8, 19, 20) and y not in (4, 5, 6, 10, 11, 15, 16, 17) if self.mapid == 1 else (x - 8) ** 2 + (y - 6) ** 2 < 13 or (x - 21) ** 2 + (y - 16) ** 2 < 13
-                if blocked and distance((x, y), self.core) > 3:
-                    self.terrain.add((x, y))
-        for x, y, resource in [(11, 8, 'metal'), (17, 13, 'circuits'), (12, 15, 'crystal'), (3, 10, 'metal'), (23, 6, 'circuits'), (18, 3, 'metal'), (4, 18, 'crystal')]:
-            if (x, y) not in self.terrain:
-                self.deposits[x, y] = [resource, 250 if resource == 'metal' else 120]
-
-    def say(self, message):
-        self.message, self.message_time = (message, 5)
-
-    def fx(self, kind, pos, color, duration=0.4, size=1, end=None, text=''):
-        self.effects.append(dict(kind=kind, pos=pos, end=end, color=color, ttl=duration, life=duration, size=size, text=text))
-
-    def connected_relays(self):
-        connected = set()
-        pending = [p for p, b in self.buildings.items() if b.role == 'generator']
-        while pending:
-            added = [p for p in pending if distance((p[0] + 0.5, p[1] + 0.5), self.corepos) <= 7 or any((distance(p, q) <= 5 for q in connected))]
-            if not added:
-                break
-            connected.update(added)
-            pending = [p for p in pending if p not in connected]
-        return connected
-
-    def in_network(self, pos, relays=None):
-        relays = self.connected_relays() if relays is None else relays
-        return distance(pos, self.corepos) <= 7 or any((distance(pos, (x + 0.5, y + 0.5)) <= 5 for x, y in relays))
-
-    def power(self):
-        relays = self.connected_relays()
-        return (12 + len(relays) * 8, sum((b.spec['power'] for b in self.buildings.values())))
-
-    def can_place(self, x, y, kind):
-        if not (0 <= x < NX and 0 <= y < NY):
-            return 'Outside the map.'
-        if (x, y) in self.terrain or (x, y) == self.core or (x, y) in self.buildings or ((x, y) in self.spawns):
-            return 'That tile is occupied.'
-        if (x, y) in self.deposits:
-            return 'Keep deposits clear; place a mining rig beside them.'
-        if not self.in_network((x + 0.5, y + 0.5)):
-            return 'Extend your build area with a connected relay generator.'
-        if any((distance(e.pos, (x + 0.5, y + 0.5)) < 0.8 and (not e.flying) for e in self.enemies)):
-            return 'A bug is on that tile.'
-        spec = SPECS[kind]
-        if spec['role'] == 'mine' and (not any((distance((x, y), p) <= 2 for p, d in self.deposits.items() if d[1] > 0))):
-            return 'Mining rigs need a deposit within 2 tiles.'
-        if self.money < spec['price']:
-            return 'Not enough dollars.'
-        for res in self.materials:
-            if self.materials[res] < spec.get(res, 0):
-                return f'Not enough {res}. Salvage deposits or build mining rigs.'
-        return ''
-
-    def place(self, x, y, kind):
-        error = self.can_place(x, y, kind)
-        if error:
-            self.say(error)
-            return False
-        spec = SPECS[kind]
-        self.money -= spec['price']
-        for res in self.materials:
-            self.materials[res] -= spec.get(res, 0)
-        b = Building(x, y, kind)
-        self.buildings[x, y] = b
-        self.repath()
-        self.fx('build', b.pos, spec['color'], 0.6, 1)
-        return True
-
-    def salvage(self, pos):
-        if self.harvest_timer > 0:
-            self.say('Salvage tool recharging.')
-            return
-        if pos not in self.deposits or self.deposits[pos][1] <= 0:
-            self.say('Click a resource deposit to salvage it.')
-            return
-        if not self.in_network((pos[0] + 0.5, pos[1] + 0.5)):
-            self.say('Connect a relay before salvaging this deposit.')
-            return
-        res, remaining = self.deposits[pos]
-        amount = min(remaining, 16 if res == 'metal' else 8)
-        self.materials[res] += amount
-        self.deposits[pos][1] -= amount
-        self.harvest_timer = 1.5
-        self.fx('text', (pos[0] + 0.5, pos[1] + 0.5), COLORS['gold'], 1, text=f'+{amount} {res}')
-
-    def buy_upgrade(self, b, path):
-        if b.upgrade_locked(path):
-            self.say('Path locked: only tier 1 is allowed after specializing in the other path.')
-            return False
-        u = b.next_upgrade(path)
-        if not u:
-            return False
-        if self.money < u['price']:
-            self.say('Not enough dollars for that upgrade.')
-            return False
-        oldmax = b.stats()['hp']
-        self.money -= u['price']
-        b.invested += u['price']
-        b.paths[path] += 1
-        b.hp += b.stats()['hp'] - oldmax
-        self.fx('upgrade', b.pos, COLORS['gold'], 0.9, 1.4)
-        self.say(f"{b.spec['name']}: {u['name']} installed.")
-        return True
-
-    def sell(self, pos):
-        b = self.buildings.pop(pos, None)
-        if not b:
-            return
-        self.money += int(b.invested * 0.7)
-        for res in self.materials:
-            self.materials[res] += int(b.spec.get(res, 0) * 0.5)
-        self.fx('text', b.pos, COLORS['gold'], 1, text=f'+{int(b.invested * 0.7)} dollars')
-        self.repath()
-
-    def repair(self, b):
-        missing = b.stats()['hp'] - b.hp
-        cost, metal = (math.ceil(missing * 0.1), math.ceil(missing * 0.025))
-        if self.money < cost or self.materials['metal'] < metal:
-            self.say('Repair needs more dollars or metal.')
-            return
-        self.money -= cost
-        self.materials['metal'] -= metal
-        b.hp = b.stats()['hp']
-        self.fx('repair', b.pos, COLORS['green'], 0.7)
-
-    def repath(self):
-        self.nav_version += 1
-        blocked = self.terrain | {p for p, b in self.buildings.items() if not (b.role == 'gate' and b.opened)}
-        self.nav = {self.core: 0}
-        q = deque([self.core])
-        while q:
-            p = q.popleft()
-            for n in self.neighbors(p):
-                if n not in blocked and n not in self.nav:
-                    self.nav[n] = self.nav[p] + 1
-                    q.append(n)
-        self.siege = {self.core: 0}
-        frontier = [(0, self.core)]
-        while frontier:
-            cost, p = heapq.heappop(frontier)
-            if cost != self.siege[p]:
-                continue
-            b = self.buildings.get(p)
-            extra = 12 if b and (not (b.role == 'gate' and b.opened)) else 0
-            for n in self.neighbors(p):
-                if n in self.terrain:
-                    continue
-                nc = cost + 1 + extra
-                if nc < self.siege.get(n, float('inf')):
-                    self.siege[n] = nc
-                    heapq.heappush(frontier, (nc, n))
-
-    @staticmethod
-    def neighbors(p):
-        x, y = p
-        return [(a, b) for a, b in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)) if 0 <= a < NX and 0 <= b < NY]
-
-    def start_wave(self):
-        if self.active or self.wave >= 40 or self.outcome:
-            return
-        self.wave += 1
-        self.active = True
-        roster = list(BUGS)[:-1]
-        available = min(len(roster), 2 + (self.wave - 1) // 3)
-        count = 11 + self.wave * 3
-        self.queue = deque((self.rng.choice(roster[:available]) for _ in range(count)))
-        if self.wave == 40:
-            self.queue.insert(16, 'Goliath Beetle')
-        self.spawn_timer = 0
-        self.say('FINAL WAVE — the Goliath Beetle has arrived!' if self.wave == 40 else f'Wave {self.wave}: {len(self.queue)} bugs incoming.')
-
-    def hurt_building(self, b, amount):
-        if (b.x, b.y) not in self.buildings:
-            return
-        guard = any((t.role == 'heavy' and t.stats().get('guard') and (distance(t.pos, b.pos) <= 3.5) for t in self.buildings.values()))
-        if guard:
-            amount *= 0.7
-        absorbed = min(b.shield, amount)
-        b.shield -= absorbed
-        amount -= absorbed
-        b.hp -= amount
-        self.fx('hit', b.pos, COLORS['red'], 0.2, 0.35)
-        if b.hp <= 0:
-            self.fx('explosion', b.pos, b.spec['color'], 0.6, 1.0)
-            del self.buildings[b.x, b.y]
-            self.repath()
-
-    def damage(self, e, amount, source=None, stats=None):
-        if e.dead:
-            return
-        stats = stats or {}
-        armor = 0.62 if e.name in ('Beetle', 'Stag Beetle', 'Ladybug', 'Goliath Beetle') else 1
-        if stats.get('pierce_armor'):
-            armor = 1
-        if e.marked > 0:
-            amount *= 1.2
-        if e.name in ('Stag Beetle', 'Goliath Beetle') or getattr(e, 'elite', False):
-            amount *= stats.get('boss_bonus', 1)
-        if e.flying:
-            amount *= stats.get('air_bonus', 1)
-        e.hp -= amount * armor
-        e.last_source = source or e.last_source
-        if stats.get('slow', 1) < 1:
-            e.slow = min(e.slow, stats['slow'])
-            e.slow_time = 2
-        e.stun = max(e.stun, stats.get('stun', 0))
-        if stats.get('mark'):
-            e.marked = 4
-        if stats.get('burn'):
-            e.burn = max(e.burn, stats['burn'])
-            e.burn_time = 3
-        if e.hp > 0:
-            return
-        e.dead = True
-        self.kills += 1
-        bounty = 1
-        for b in self.buildings.values():
-            if b.role == 'command' and distance(b.pos, e.pos) <= b.stats()['range']:
-                bounty = max(bounty, b.stats()['bounty'])
-        self.money += int(BUGS[e.name][2] * bounty)
-        self.materials['metal'] += 2 if e.name not in FLIERS else 1
-        if self.rng.random() < 0.3:
-            self.materials['circuits'] += 1
-        if e.name in ('Stag Beetle', 'Bombardier Beetle') or self.rng.random() < 0.035:
-            self.materials['crystal'] += 1
-        self.fx('defeat', e.pos, BUGS[e.name][4], 0.45, 0.5)
-        if source and stats.get('death_blast'):
-            self.fx('explosion', e.pos, COLORS['gold'], 0.4, 0.8)
-            secondary = dict(stats, death_blast=0)
-            for other in self.enemies:
-                if not other.dead and distance(other.pos, e.pos) < 1:
-                    self.damage(other, 35, source, secondary)
-
-    def launch(self, b, e, stats, role, damage, offset=0):
-        speed = 7 if role == 'mortar' else 10 if role == 'rocket' else 22
-        self.projectiles.append(dict(x=b.pos[0], y=b.pos[1], origin=b.pos, target=e, dest=e.pos, stats=dict(stats), role=role, damage=damage, source=b, speed=speed, age=-offset, life=5))
-
-    def impact(self, p):
-        role, s = (p['role'], p['stats'])
-        pos = (p['x'], p['y'])
-        splash = (1.45 if role == 'mortar' else 1.05 if role == 'rocket' else 0) * s['splash']
-        splash = max(splash, s.get('explosion', 0))
-        if splash:
-            self.fx('explosion', pos, COLORS['blue'] if role == 'air' else COLORS['gold'], 0.55, splash)
-            if role == 'mortar':
-                self.shake = max(self.shake, 2)
-            for e in self.enemies:
-                if not e.dead and distance(e.pos, pos) <= splash:
-                    if role == 'air' and (not e.flying):
-                        continue
-                    self.damage(e, p['damage'], p['source'], s)
-            if s['cluster']:
-                for i in range(s['cluster']):
-                    a = i * math.tau / s['cluster']
-                    q = (pos[0] + math.cos(a), pos[1] + math.sin(a))
-                    self.fx('explosion', q, '#ffb37c', 0.5, 0.7)
-                    for e in self.enemies:
-                        if not e.dead and distance(e.pos, q) < 0.85:
-                            self.damage(e, p['damage'] * 0.4, p['source'], s)
-            if s['hazard']:
-                self.hazards.append(dict(pos=pos, ttl=3, damage=s['hazard'], source=p['source'], radius=splash))
-        else:
-            e = p['target']
-            if not e.dead:
-                self.damage(e, p['damage'], p['source'], s)
-            self.fx('hit', pos, p['source'].spec['color'], 0.2, 0.35)
-            if s['chain']:
-                others = sorted([q for q in self.enemies if not q.dead and distance(q.pos, pos) < 2], key=lambda q: distance(q.pos, pos))[:s['chain']]
-                previous = pos
-                for q in others:
-                    self.fx('beam', previous, COLORS['purple'], 0.25, end=q.pos)
-                    self.damage(q, p['damage'] * 0.65, p['source'], s)
-                    previous = q.pos
-
-    def operate_buildings(self, dt):
-        supply, used = self.power()
-        relays = self.connected_relays()
-        efficiency = min(1, supply / max(1, used))
-        for b in list(self.buildings.values()):
-            b.cooldown -= dt
-            b.animation = max(0, b.animation - dt)
-            b.jam = max(0, b.jam - dt)
-            b.shield = max(0, b.shield - dt * 1.5)
-            if b.role in ('wall', 'gate', 'generator'):
-                continue
-            if b.cooldown > 0:
-                continue
-            s = b.stats()
-            net = self.in_network(b.pos, relays)
-            power = efficiency * (1 if net else 0.2) * (0.45 if b.jam else 1)
-            if b.role == 'mine':
-                if net:
-                    candidates = [(p, d) for p, d in self.deposits.items() if d[1] > 0 and distance((b.x, b.y), p) <= 2]
-                    if candidates:
-                        p, d = min(candidates, key=lambda pd: distance((b.x, b.y), pd[0]))
-                        amount = min(d[1], 4 if d[0]=='metal' else 2 if d[0]=='circuits' else 1)
-                        d[1] -= amount
-                        self.materials[d[0]] += amount
-                        self.fx('beam', b.pos, COLORS['gold'], 0.6, end=(p[0] + 0.5, p[1] + 0.5))
-                        self.fx('text', b.pos, COLORS['gold'], 1, text=f'+{amount} {d[0]}')
-                b.cooldown = 10 / max(0.2,power)
-                continue
-            if b.role in ('repair', 'shield'):
-                radius = s['range'] if b.role == 'repair' else 3.0
-                if b.role == 'shield':
-                    for t in self.buildings.values():
-                        if distance(b.pos, t.pos) <= radius:
-                            t.shield = min(120, t.shield + 18 * power)
-                    self.fx('ring', b.pos, COLORS['purple'], 0.8, radius)
-                    b.cooldown = 2
-                    continue
-                hurt = sorted([t for t in self.buildings.values() if t.hp < t.stats()['hp'] and distance(b.pos, t.pos) <= radius], key=lambda t: t.hp / t.stats()['hp'])
-                for t in hurt[:s['heal_targets']]:
-                    t.hp = min(t.stats()['hp'], t.hp + 40 * s['heal'] * power)
-                    if s['shield']:
-                        t.shield = min(150, t.shield + 35)
-                    self.fx('beam', b.pos, COLORS['green'], 0.5, end=t.pos)
-                    self.fx('repair', t.pos, COLORS['green'], 0.5)
-                if distance(b.pos, self.corepos) <= radius and self.corehp < self.coremax:
-                    self.corehp = min(self.coremax, self.corehp + 12 * s['core_heal'] * power)
-                    self.fx('beam', b.pos, COLORS['green'], 0.5, end=self.corepos)
-                b.cooldown = 1 / max(0.2, power)
-                continue
-            rate, extra_range, extra_damage = (1.0, 1.0, 1.0)
-            for t in self.buildings.values():
-                ts = t.stats()
-                if t.role == 'command' and distance(b.pos, t.pos) <= ts['range']:
-                    rate = max(rate, ts['aura_rate'])
-                    extra_range = max(extra_range, ts['aura_range'])
-                    extra_damage = max(extra_damage, ts['aura_damage'])
-                    if ts['shield']:
-                        b.shield = min(130, b.shield + 15)
-                if t.role == 'repair' and distance(b.pos, t.pos) <= ts['range']:
-                    rate = max(rate, ts['support_rate'])
-            candidates = [e for e in self.enemies if not e.dead and distance(e.pos, b.pos) <= s['range'] * extra_range and (not (b.role == 'air' and (not s['ground']) and (not e.flying))) and (not (b.role in ('flame', 'mortar', 'scatter') and e.flying)) and (not (b.role == 'mortar' and distance(e.pos, b.pos) < 1.5))]
-            if not candidates:
-                continue
-            e = self.choose_target(b, candidates) if hasattr(self, 'choose_target') else min(candidates, key=lambda e: distance(e.pos, self.corepos))
-            b.angle = math.atan2(e.y - b.pos[1], e.x - b.pos[0])
-            b.animation = 0.18
-            damage = s['damage'] * extra_damage
-            if b.role == 'flame':
-                self.fx('flame', b.pos, '#ffb478', 0.3, s['range'], end=e.pos)
-                for q in candidates:
-                    a = math.atan2(q.y - b.pos[1], q.x - b.pos[0])
-                    diff = abs((a - b.angle + math.pi) % math.tau - math.pi)
-                    if diff < 0.48 * s['splash']:
-                        self.damage(q, damage, b, s)
-                if s['explosion']:
-                    self.launch(b, e, s, 'rocket', damage)
-            elif b.role == 'cryo':
-                center = e.pos
-                radius = 1.1 * s['splash']
-                self.fx('frost', center, COLORS['blue'], 0.65, radius)
-                for q in candidates:
-                    if distance(q.pos, center) <= radius:
-                        self.damage(q, damage, b, s)
-            elif b.role == 'rail':
-                for target in candidates[:s['burst']]:
-                    dx, dy = (target.x - b.pos[0], target.y - b.pos[1])
-                    length = max(0.1, math.hypot(dx, dy))
-                    end = (b.pos[0] + dx / length * s['range'] * extra_range, b.pos[1] + dy / length * s['range'] * extra_range)
-                    self.fx('rail', b.pos, COLORS['blue'], 0.3, end=end)
-                    for q in candidates:
-                        ex, ey = (q.x - b.pos[0], q.y - b.pos[1])
-                        if abs(ex * dy - ey * dx) / length < s['beam_width'] and ex * dx + ey * dy > 0:
-                            self.damage(q, damage, b, s)
-                    if s['explosion']:
-                        self.launch(b, target, s, 'rocket', damage * 0.5)
-            elif b.role == 'scatter':
-                spread = 0.65 * s['cone']
-                pellets = s['pellets']
-                for i in range(pellets):
-                    a = b.angle + (i / max(1, pellets - 1) - 0.5) * spread
-                    end = (b.pos[0] + math.cos(a) * s['range'], b.pos[1] + math.sin(a) * s['range'])
-                    self.fx('beam', b.pos, '#ffe8a5', 0.12, end=end)
-                    lined = [q for q in candidates if abs((math.atan2(q.y - b.pos[1], q.x - b.pos[0]) - a + math.pi) % math.tau - math.pi) < 0.15]
-                    if lined:
-                        self.damage(min(lined, key=lambda q: distance(q.pos, b.pos)), damage, b, s)
-            else:
-                for i in range(s['burst']):
-                    self.launch(b, e, s, b.role, damage, i * 0.07)
-                self.fx('muzzle', b.pos, COLORS['gold'], 0.12, 0.35, end=e.pos)
-            b.cooldown = b.spec['cooldown'] / max(0.15, power) / rate / s['rate']
-
-    def bug_attack(self, e, target):
-        """Recognizable insects with distinct gameplay behaviors and attack effects."""
-        spec = BUGS[e.name]
-        role = e.role
-        strength = 1 + self.wave * 0.055
-        pos = target.pos if isinstance(target, Building) else self.corepos
-        amount = spec[6] * strength
-        if role == 'chew' and isinstance(target, Building) and (target.role in ('wall', 'gate')):
-            amount *= 3
-        if role == 'ram':
-            amount *= 1.8 if e.ability <= 0 else 1
-            e.ability = 4
-        if role == 'scuttle':
-            amount *= 0.65
-        if role == 'sting':
-            self.fx('beam', e.pos, '#eac86a', 0.2, end=pos)
-            if isinstance(target, Building):
-                target.jam = max(target.jam, 1.5)
-        elif role == 'dust':
-            self.fx('dust', e.pos, '#d9cdb0', 0.9, 2)
-            for b in self.buildings.values():
-                if distance(e.pos, b.pos) <= 3:
-                    b.jam = 3
-        elif role == 'spray':
-            self.fx('acid', e.pos, '#c0de79', 0.5, end=pos)
-            self.hazards.append(dict(pos=pos, ttl=2, damage=10 * strength, enemy=True, radius=0.8))
-        elif role == 'slash':
-            self.fx('slash', pos, '#b5e2a3', 0.35, 0.8)
-            for b in list(self.buildings.values()):
-                if b is not target and distance(b.pos, pos) < 1.3:
-                    self.hurt_building(b, amount * 0.4)
-        elif role == 'crush':
-            self.fx('ring', pos, '#e6c993', 0.5, 1.4)
-            for b in list(self.buildings.values()):
-                if b is not target and distance(b.pos, pos) < 1.2:
-                    self.hurt_building(b, amount * 0.4)
-        elif role == 'shell':
-            self.fx('ring', e.pos, '#efab92', 0.5, 1.1)
-            e.hp = min(e.maxhp, e.hp + e.maxhp * 0.015)
-        elif role == 'boss':
-            self.fx('shockwave', e.pos, '#f6c586', 0.9, 3)
-            self.shake = 6
-            for b in list(self.buildings.values()):
-                if b is not target and distance(b.pos, e.pos) <= 2.5:
-                    self.hurt_building(b, amount * 0.45)
-        else:
-            self.fx('slash' if role == 'leap' else 'hit', pos, '#f3c49b', 0.3, 0.6)
-        if isinstance(target, Building):
-            self.hurt_building(target, amount)
-        else:
-            self.corehp -= amount
-            self.shake = max(self.shake, 2)
-            self.fx('hit', self.corepos, COLORS['red'], 0.3, 1)
-        e.timer = 0.45 if role == 'scuttle' else 1.8 if role in ('boss', 'spray', 'crush') else 1.1
-
-    def move_enemies(self, dt):
-        spawned = []
-        for e in self.enemies:
-            if e.dead:
-                continue
-            e.timer -= dt
-            e.ability -= dt
-            e.marked = max(0, e.marked - dt)
-            e.slow_time = max(0, e.slow_time - dt)
-            if not e.slow_time:
-                e.slow = 1
-            e.stun = max(0, e.stun - dt)
-            if e.burn_time > 0:
-                e.burn_time -= dt
-                self.damage(e, e.burn * dt, e.last_source)
-                if e.dead:
-                    continue
-            if e.stun:
-                continue
-            cell = (min(NX - 1, max(0, int(e.x))), min(NY - 1, max(0, int(e.y))))
-            nearby = [b for b in self.buildings.values() if distance(e.pos, b.pos) <= BUGS[e.name][7]]
-            target = None
-            if e.role in ('spray', 'dust') and nearby:
-                target = min(nearby, key=lambda b: distance(e.pos, b.pos))
-            elif distance(e.pos, self.corepos) <= BUGS[e.name][7]:
-                target = 'core'
-            if target:
-                if e.timer <= 0:
-                    self.bug_attack(e, target)
-                continue
-            if e.role == 'boss' and e.ability <= 0:
-                for i in range(3):
-                    x = max(0.5, min(NX - 0.5, e.x + self.rng.uniform(-1, 1)))
-                    y = max(0.5, min(NY - 0.5, e.y + self.rng.uniform(-1, 1)))
-                    if (int(x), int(y)) not in self.terrain:
-                        spawned.append(Enemy('Ant', x, y, self.wave))
-                e.ability = 8
-                self.fx('shockwave', e.pos, COLORS['gold'], 1, 2)
-            if e.nav_version != self.nav_version:
-                e.waypoint = None
-                e.nav_version = self.nav_version
-            approach=self.approach_destination(e) if hasattr(self,'approach_destination') else None
-            if approach is not None:
-                destination=approach
-            elif e.flying:
-                destination = self.corepos
-            else:
-                if e.waypoint is None:
-                    field = self.nav if cell in self.nav else self.siege
-                    options = [p for p in self.neighbors(cell) if p in field]
-                    if not options:
-                        continue
-
-                    def score(p):
-                        b = self.buildings.get(p)
-                        return field[p] + (12 if b and (not (b.role == 'gate' and b.opened)) else 0)
-                    p = min(options, key=score)
-                    e.waypoint = (p[0] + 0.5, p[1] + 0.5)
-                destination = e.waypoint
-                b = self.buildings.get((int(destination[0]), int(destination[1])))
-                if e.role == 'leap' and e.ability <= 0:
-                    if b and b.role in ('wall', 'gate'):
-                        dx, dy = (int(destination[0]) - cell[0], int(destination[1]) - cell[1])
-                        landing = (cell[0] + dx * 2, cell[1] + dy * 2)
-                        if 0 <= landing[0] < NX and 0 <= landing[1] < NY and (landing not in self.terrain) and (landing not in self.buildings) and (not hasattr(self,'reserved_trails') or landing in self.reserved_trails or self.in_core_area((landing[0]+.5,landing[1]+.5))):
-                            old = e.pos
-                            e.x, e.y = (landing[0] + 0.5, landing[1] + 0.5)
-                            e.waypoint = None
-                            e.ability = 7
-                            self.fx('leap', old, '#b8dc8f', 0.6, end=e.pos)
-                            continue
-                if b and (not (b.role == 'gate' and b.opened)):
-                    if distance(e.pos, b.pos) <= BUGS[e.name][7]:
-                        if e.timer <= 0:
-                            self.bug_attack(e, b)
-                        continue
-            dx, dy = (destination[0] - e.x, destination[1] - e.y)
-            dist = math.hypot(dx, dy)
-            speed = BUGS[e.name][1] * (1 + min(0.35, self.wave * 0.006)) * e.slow * getattr(e, 'speed_multiplier', 1)
-            if e.role == 'dive' and e.ability <= 0:
-                speed *= 3
-            if e.role == 'dive' and e.ability < -1.2:
-                e.ability = 5
-            if e.role == 'ram' and e.ability <= 0:
-                speed *= 1.6
-            step = min(dist, speed * dt)
-            if dist > 0.001:
-                nx, ny = (e.x + dx / dist * step, e.y + dy / dist * step)
-                block = self.buildings.get((int(nx), int(ny)))
-                if not e.flying and block and (not (block.role == 'gate' and block.opened)):
-                    if e.timer <= 0:
-                        self.bug_attack(e, block)
-                elif e.flying or (int(nx), int(ny)) not in self.terrain:
-                    e.x, e.y = (nx, ny)
-                e.angle = math.atan2(dy, dx)
-            if dist <= step + 0.001:
-                e.waypoint = None
-        self.enemies.extend(spawned)
-
-    def update(self, dt):
-        if self.outcome:
-            return
-        self.elapsed += dt
-        self.message_time = max(0, self.message_time - dt)
-        self.harvest_timer = max(0, self.harvest_timer - dt)
-        self.shake = max(0, self.shake - dt * 12)
-        if self.active and self.queue:
-            self.spawn_timer -= dt
-            if self.spawn_timer <= 0:
-                spawn = self.rng.choice(self.incoming_spawns() if hasattr(self,'incoming_spawns') else self.spawns[:min(4,1+self.wave//5)])
-                self.enemies.append(Enemy(self.queue.popleft(), spawn[0] + 0.5, spawn[1] + 0.5, self.wave))
-                self.spawn_timer = max(0.2, 0.75 - self.wave * 0.012)
-        self.operate_buildings(dt)
-        for p in self.projectiles:
-            p['age'] += dt
-            p['life'] -= dt
-            if p['age'] < 0:
-                continue
-            if not p['target'].dead and p['role'] != 'mortar':
-                p['dest'] = p['target'].pos
-            dx, dy = (p['dest'][0] - p['x'], p['dest'][1] - p['y'])
-            dist = math.hypot(dx, dy)
-            step = p['speed'] * dt
-            if dist <= step:
-                p['x'], p['y'] = p['dest']
-                self.impact(p)
-                p['life'] = 0
-            elif dist:
-                p['x'] += dx / dist * step
-                p['y'] += dy / dist * step
-        self.projectiles = [p for p in self.projectiles if p['life'] > 0]
-        self.move_enemies(dt)
-        for h in self.hazards:
-            h['ttl'] -= dt
-            if h.get('enemy'):
-                for b in list(self.buildings.values()):
-                    if distance(b.pos, h['pos']) < h['radius']:
-                        self.hurt_building(b, h['damage'] * dt)
-            else:
-                for e in self.enemies:
-                    if not e.flying and distance(e.pos, h['pos']) < h['radius']:
-                        self.damage(e, h['damage'] * dt, h['source'])
-        self.hazards = [h for h in self.hazards if h['ttl'] > 0]
-        self.enemies = [e for e in self.enemies if not e.dead]
-        for f in self.effects:
-            f['ttl'] -= dt
-        self.effects = [f for f in self.effects if f['ttl'] > 0][-450:]
-        if self.corehp <= 0:
-            self.corehp = 0
-            self.outcome = 'lost'
-        elif self.active and (not self.queue) and (not self.enemies):
-            self.active = False
-            self.projectiles = []
-            self.intermission = 8
-            reward = 100 + self.wave * 18
-            self.money += reward
-            self.materials['metal'] += 18
-            self.materials['circuits'] += 5
-            self.say(f'Wave cleared! +{reward} dollars, +18 metal, +5 circuits.')
-            if self.wave == 40:
-                self.outcome = 'won'
-        elif not self.active and self.autoplay:
-            self.intermission -= dt
-            if self.intermission <= 0:
-                self.start_wave()
-
-def tint(color, target, amount):
-    """Blend two RGB colors without third-party imaging packages."""
-    amount = max(0, min(1, amount))
-    a = [int(color[i:i + 2], 16) for i in (1, 3, 5)]
-    b = [int(target[i:i + 2], 16) for i in (1, 3, 5)]
-    return '#' + ''.join((f'{round(x + (y - x) * amount):02x}' for x, y in zip(a, b)))
-
-def ease(t):
-    t = max(0, min(1, t))
-    return 1 - (1 - t) ** 3
-
-class CanvasPool:
-    """Reuse Canvas objects and update only changed coordinates or properties.
-
-    Unlike deleting and recreating the whole scene, this preserves Tk objects
-    and avoids thousands of allocations every frame. Fixed drawing layers keep
-    reused items in the proper visual order when objects appear or disappear.
-    """
-    LAYERS = ('terrain', 'ground', 'actors', 'effects', 'masks', 'hud', 'modal', 'transition')
-
-    def __init__(self, widget, app):
-        self.widget = widget
-        self.app = app
-        self.layer = 'hud'
-        self.pools = defaultdict(list)
-        self.cursors = defaultdict(int)
-        self.hidden = set()
-        self.records = {}
-        self.width = WIDTH
-        self.height = HEIGHT
-        self.calls = 0
-        self.updated = 0
-        self.sequence = defaultdict(list)
-        self.previous_sequence = {}
-        self.held = set()
-
-    def begin(self):
-        self.cursors.clear()
-        self.sequence.clear()
-        self.held.clear()
-        self.calls = 0
-        self.updated = 0
-
-    def reuse_layer(self, name):
-        self.held.add(name)
-        self.sequence[name] = self.previous_sequence.get(name, [])
-
-    def set_layer(self, name):
-        self.layer = name
-
-    def coordinates(self, values):
-        out = []
-        camera_layer = False
-        scale = self.app.scale
-        ox, oy = self.app.offset
-        for i in range(0, len(values), 2):
-            x, y = (values[i], values[i + 1])
-            if camera_layer:
-                x, y = self.app.camera.project(x, y)
-            out.extend((round(x * scale + ox, 2), round(y * scale + oy, 2)))
-        return tuple(out)
-
-    def create(self, kind, coords, options):
-        self.calls += 1
-        key = (self.layer, kind)
-        index = self.cursors[key]
-        self.cursors[key] += 1
-        coords = self.coordinates(coords)
-        options = dict(options)
-        options['tags'] = (self.layer,)
-        if kind == 'image':
-            options.pop('width', None)
-        if index == len(self.pools[key]):
-            item = getattr(self.widget, 'create_' + kind)(*coords, **options)
-            self.pools[key].append(item)
-            self.records[item] = (coords, options)
-            self.updated += 1
-        else:
-            item = self.pools[key][index]
-            oldcoords, oldoptions = self.records[item]
-            if oldcoords != coords:
-                self.widget.coords(item, *coords)
-                self.updated += 1
-            changed = {name: value for name, value in options.items() if oldoptions.get(name) != value}
-            if item in self.hidden:
-                changed['state'] = 'normal'
-                self.hidden.remove(item)
-            if changed:
-                self.widget.itemconfigure(item, **changed)
-                self.updated += 1
-            self.records[item] = (coords, options)
-        self.sequence[self.layer].append(item)
-        return item
-
-    def create_rectangle(self, *coords, **options):
-        return self.create('rectangle', coords, options)
-
-    def create_oval(self, *coords, **options):
-        return self.create('oval', coords, options)
-
-    def create_polygon(self, *coords, **options):
-        return self.create('polygon', coords, options)
-
-    def create_line(self, *coords, **options):
-        return self.create('line', coords, options)
-
-    def create_text(self, *coords, **options):
-        return self.create('text', coords, options)
-
-    def create_image(self, *coords, **options):
-        return self.create('image', coords, options)
-
-    def end(self):
-        for key, pool in self.pools.items():
-            if key[0] in self.held:
-                continue
-            used = self.cursors.get(key, 0)
-            for item in pool[used:]:
-                if item not in self.hidden:
-                    self.widget.itemconfigure(item, state='hidden')
-                    self.hidden.add(item)
-        for layer in self.LAYERS:
-            order = self.sequence.get(layer, [])
-            if order != self.previous_sequence.get(layer):
-                for item in order:
-                    self.widget.tag_raise(item)
-                self.previous_sequence[layer] = list(order)
-            self.widget.tag_raise(layer)
-
-    def bind(self, *args, **kwargs):
-        return self.widget.bind(*args, **kwargs)
-
-    def winfo_width(self):
-        return self.widget.winfo_width()
-
-    def winfo_height(self):
-        return self.widget.winfo_height()
-
-@dataclass
-class WavePlan:
-    wave: int
-    name: str
-    description: str
-    focus: str
-    count_bonus: int = 0
-    health_bonus: float = 1.0
-    speed_bonus: float = 1.0
-
-WAVE_DEFINITIONS = [{'wave': 1,
-  'name': 'First contact',
-  'description': 'Small groups of ants test the perimeter.',
-  'focus': 'Ant',
-  'count_bonus': 0,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 2,
-  'name': 'Under the shell',
-  'description': 'Armored beetles join the march.',
-  'focus': 'Beetle',
-  'count_bonus': 0,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 3,
-  'name': 'Long trail',
-  'description': 'A longer procession approaches.',
-  'focus': 'Ant',
-  'count_bonus': 3,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 4,
-  'name': 'Fast feet',
-  'description': 'Cockroaches close the distance quickly.',
-  'focus': 'Cockroach',
-  'count_bonus': 0,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 5,
-  'name': 'The first rush',
-  'description': 'A larger swarm approaches from two sides.',
-  'focus': 'Ant',
-  'count_bonus': 8,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 6,
-  'name': 'Hard shells',
-  'description': 'Beetles soak up ordinary bullets.',
-  'focus': 'Beetle',
-  'count_bonus': 0,
-  'health_bonus': 1.15,
-  'speed_bonus': 1.0},
- {'wave': 7,
-  'name': 'Foundation trouble',
-  'description': 'Termites chew through walls.',
-  'focus': 'Termite',
-  'count_bonus': 0,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 8,
-  'name': 'Scuttling column',
-  'description': 'Fast ground insects mix with armored escorts.',
-  'focus': 'Cockroach',
-  'count_bonus': 4,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 9,
-  'name': 'Wall test',
-  'description': 'Termites probe the outer defenses.',
-  'focus': 'Termite',
-  'count_bonus': 4,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 10,
-  'name': 'Iron procession',
-  'description': 'An elite beetle leads the wave.',
-  'focus': 'Beetle',
-  'count_bonus': 5,
-  'health_bonus': 1.1,
-  'speed_bonus': 1.0},
- {'wave': 11,
-  'name': 'Wings overhead',
-  'description': 'Wasps bypass walls and disrupt robots.',
-  'focus': 'Wasp',
-  'count_bonus': 0,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 12,
-  'name': 'Mixed signals',
-  'description': 'Wasps and ground bugs attack together.',
-  'focus': 'Wasp',
-  'count_bonus': 4,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 13,
-  'name': 'Over the fence',
-  'description': 'Grasshoppers jump single walls.',
-  'focus': 'Grasshopper',
-  'count_bonus': 0,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 14,
-  'name': 'No easy route',
-  'description': 'Ground squads look for openings.',
-  'focus': 'Termite',
-  'count_bonus': 7,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 15,
-  'name': 'Crossfire',
-  'description': 'A quick swarm attacks from several entrances.',
-  'focus': 'Cockroach',
-  'count_bonus': 12,
-  'health_bonus': 1,
-  'speed_bonus': 1.08},
- {'wave': 16,
-  'name': 'Sharp approach',
-  'description': 'Mantises threaten tightly packed structures.',
-  'focus': 'Mantis',
-  'count_bonus': 0,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 17,
-  'name': 'Heavy escorts',
-  'description': 'Armored insects shield the attackers.',
-  'focus': 'Beetle',
-  'count_bonus': 5,
-  'health_bonus': 1.15,
-  'speed_bonus': 1.0},
- {'wave': 18,
-  'name': 'Spring loaded',
-  'description': 'Grasshoppers challenge narrow defensive lines.',
-  'focus': 'Grasshopper',
-  'count_bonus': 8,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 19,
-  'name': 'Dust cloud',
-  'description': 'Moths disrupt nearby weapon systems.',
-  'focus': 'Moth',
-  'count_bonus': 0,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 20,
-  'name': 'Mandibles',
-  'description': 'An elite stag beetle leads an armored column.',
-  'focus': 'Stag Beetle',
-  'count_bonus': 8,
-  'health_bonus': 1.1,
-  'speed_bonus': 1.0},
- {'wave': 21,
-  'name': 'High and low',
-  'description': 'Flying and armored bugs arrive together.',
-  'focus': 'Wasp',
-  'count_bonus': 10,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 22,
-  'name': 'Shell formation',
-  'description': 'Stag beetles crush nearby buildings.',
-  'focus': 'Stag Beetle',
-  'count_bonus': 3,
-  'health_bonus': 1.15,
-  'speed_bonus': 1.0},
- {'wave': 23,
-  'name': 'Wide wings',
-  'description': 'Moths fill the air above the base.',
-  'focus': 'Moth',
-  'count_bonus': 10,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 24,
-  'name': 'Endless legs',
-  'description': 'A dense ground wave tests sustained damage.',
-  'focus': 'Ant',
-  'count_bonus': 22,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 25,
-  'name': 'Sudden dive',
-  'description': 'Dragonflies make fast diving attacks.',
-  'focus': 'Dragonfly',
-  'count_bonus': 6,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 26,
-  'name': 'Heavy landing',
-  'description': 'Stag beetles and airborne scouts converge.',
-  'focus': 'Stag Beetle',
-  'count_bonus': 8,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 27,
-  'name': 'Cutting edge',
-  'description': 'Mantises attack the front line.',
-  'focus': 'Mantis',
-  'count_bonus': 10,
-  'health_bonus': 1.1,
-  'speed_bonus': 1.0},
- {'wave': 28,
-  'name': 'Red armor',
-  'description': 'Ladybugs bring tough defensive shells.',
-  'focus': 'Ladybug',
-  'count_bonus': 4,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 29,
-  'name': 'Four directions',
-  'description': 'A mixed wave surrounds the base.',
-  'focus': 'Dragonfly',
-  'count_bonus': 12,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 30,
-  'name': 'Crushing pressure',
-  'description': 'A reinforced elite leads the assault.',
-  'focus': 'Stag Beetle',
-  'count_bonus': 14,
-  'health_bonus': 1.12,
-  'speed_bonus': 1.0},
- {'wave': 31,
-  'name': 'Chemical defense',
-  'description': 'Bombardier beetles spray damaging chemicals.',
-  'focus': 'Bombardier Beetle',
-  'count_bonus': 0,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 32,
-  'name': 'No safe distance',
-  'description': 'Ranged attackers pressure clustered defenses.',
-  'focus': 'Bombardier Beetle',
-  'count_bonus': 8,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 33,
-  'name': 'Air current',
-  'description': 'Flying bugs approach at increased speed.',
-  'focus': 'Dragonfly',
-  'count_bonus': 12,
-  'health_bonus': 1,
-  'speed_bonus': 1.1},
- {'wave': 34,
-  'name': 'Carapace wall',
-  'description': 'Heavy armor advances down every route.',
-  'focus': 'Ladybug',
-  'count_bonus': 6,
-  'health_bonus': 1.2,
-  'speed_bonus': 1.0},
- {'wave': 35,
-  'name': 'Swarmfront',
-  'description': 'A very large combined swarm approaches.',
-  'focus': 'Ant',
-  'count_bonus': 30,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 36,
-  'name': 'Breach team',
-  'description': 'Termites and bombardiers attack your perimeter.',
-  'focus': 'Termite',
-  'count_bonus': 18,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 37,
-  'name': 'Last flight',
-  'description': 'A final dense airborne formation.',
-  'focus': 'Wasp',
-  'count_bonus': 20,
-  'health_bonus': 1.1,
-  'speed_bonus': 1.0},
- {'wave': 38,
-  'name': 'Heavy footsteps',
-  'description': 'Elite beetles escort the vanguard.',
-  'focus': 'Stag Beetle',
-  'count_bonus': 12,
-  'health_bonus': 1.2,
-  'speed_bonus': 1.0},
- {'wave': 39,
-  'name': 'The gathering',
-  'description': 'Every species joins the final approach.',
-  'focus': 'Bombardier Beetle',
-  'count_bonus': 25,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0},
- {'wave': 40,
-  'name': 'Goliath',
-  'description': 'The Goliath Beetle and its escorts arrive.',
-  'focus': 'Goliath Beetle',
-  'count_bonus': 20,
-  'health_bonus': 1.0,
-  'speed_bonus': 1.0}]
-
-WAVE_PLANS = [WavePlan(**entry) for entry in WAVE_DEFINITIONS]
-
-# FIELD ENGINEER GAMEPLAY -----------------------------------------------------
-WIDTH, HEIGHT = 1440, 940
-TILE = 46
-NX, NY = 28, 22
-LEFT, TOP = 18, 94
-VIEW_W, VIEW_H = 1100, 750
-PANEL_X = 1136
-TITLE = 'PROJECT-SWARMFALL'
-
-ROBOT_NAMES = (
-    'Rifle Robot', 'Heavy Robot', 'Sniper Robot', 'Flame Tank',
-    'Rocket Buggy', 'Artillery Robot', 'Cooling Robot', 'Piercing Walker',
-    'Anti-Air Robot', 'Repair Robot', 'Support Robot', 'Shotgun Robot',
-)
-for spec, name in zip(ROBOTS, ROBOT_NAMES):
-    spec['name'] = name
-STRUCTURES[2]['name'] = 'Power Generator'
-STRUCTURES[3]['name'] = 'Mining Station'
-STRUCTURES[4]['name'] = 'Shield Generator'
-STRUCTURES[0].update(price=22,metal=20,hp=520)
-STRUCTURES[1].update(price=45,metal=26,hp=540)
-STRUCTURES[3].update(price=145,metal=36,circuits=14,power=2)
-
-DESCRIPTIONS = {
-    'rifle': ('Reliable defender', 'Fires at one bug at a time. A useful first robot that can hit both ground and flying enemies.'),
-    'heavy': ('Fast sustained fire', 'Rapid bullets wear down swarms. Place it where bugs stay within range for a long time.'),
-    'sniper': ('Long-range specialist', 'Slow, powerful shots against tough bugs. Its upgrades can break armor and counter the boss.'),
-    'flame': ('Close-range crowd damage', 'Sprays a cone of fire through groups of ground bugs. Cannot hit flying enemies.'),
-    'rocket': ('Explosive support', 'Fires rockets that explode around a target. Can hit ground and flying bugs.'),
-    'mortar': ('Long-range artillery', 'Lobs shells over your walls. Good against crowds, but cannot fire at very close targets or flying bugs.'),
-    'cryo': ('Slows the swarm', 'Cooling bursts slow groups of bugs so your other robots can keep firing at them.'),
-    'rail': ('Piercing heavy weapon', 'A straight shot passes through several bugs. Best when aimed along an enemy approach.'),
-    'air': ('Protects the skies', 'Fast tracking weapons target flying insects. Its multirole upgrade unlocks ground attacks.'),
-    'repair': ('Keeps the base working', 'Repairs nearby robots, structures and the core. This robot does not attack.'),
-    'command': ('Helps nearby robots', 'Boosts the firing speed of nearby defenders and fires a small support weapon.'),
-    'scatter': ('Close-range interception', 'Fires several pellets into nearby ground bugs. Works well at bends in your defenses.'),
-    'wall': ('Redirects ground bugs', 'Stops ground bugs for a while. Uses one wall slot. Keep routes to the core open.'),
-    'gate': ('A passage you control', 'Walk up and press E to open or close it. Open gates let your engineer and bugs through.'),
-    'generator': ('Power and building reach', 'Adds 8 power and extends your connected construction area by 5 tiles. Keep generators linked to the core.'),
-    'mine': ('Slow automatic mining', 'Collects small amounts every 10 seconds. Place near a deposit. Maximum two stations.'),
-    'shield': ('Extra protection', 'Adds protective shields to nearby structures. Shields absorb damage before buildings lose health.'),
-}
-RESOURCE_NAMES = {'metal': 'Metal', 'circuits': 'Parts', 'crystal': 'Crystals'}
-RESOURCE_COLORS = {'metal': '#c1d3db', 'circuits': '#e9bd80', 'crystal': '#c1a8ee'}
-
-
-@dataclass(frozen=True)
-class Level:
-    name: str
-    difficulty: str
-    description: str
-    terrain_style: str
-    ground: str
-    ground_dark: str
-    accent: str
-    health_factor: float
-    core_health: int
-    weather: str = 'pollen'
-
-
-LEVELS = (
-    Level('Sunlit Meadow', 'Easy', 'Two trails and plenty of room to build.',
-          'meadow', '#a8c88c', '#91b476', '#dbeab6', .72, 5600),
-    Level('Pine Clearing', 'Easy', 'Three trails. Trees break up the open ground.',
-          'grove', '#96b987', '#7ca275', '#d1dfac', .8, 5400),
-    Level('River Bend', 'Easy', 'Three trails with river crossings.',
-          'river', '#a1c4a0', '#85ae91', '#b9e2cf', .9, 5200, 'water'),
-    Level('Amber Quarry', 'Medium', 'Four trails through the quarry.',
-          'quarry', '#d5b78c', '#c4a276', '#f3d6a2', 1., 4500, 'dust'),
-    Level('Canyon Pass', 'Medium', 'Four trails and narrow gaps between rocks.',
-          'canyon', '#d0a37d', '#b98b67', '#efc79b', 1.1, 4500, 'dust'),
-    Level('Wetland Station', 'Medium', 'Five trails around pools of water.',
-          'wetland', '#9bb9a2', '#7d9f8e', '#c1dfc8', 1.2, 4300, 'water'),
-    Level('Ironworks', 'Hard', 'Five trails through the old factory.',
-          'industrial', '#a9b4a7', '#8e9e93', '#dbd6b4', 1.35, 4000, 'dust'),
-    Level('Storm Basin', 'Hard', 'Six trails, rain, and tougher bugs.',
-          'storm', '#8caeaa', '#739591', '#c6dedb', 1.5, 3900, 'rain'),
-    Level('Last Outpost', 'Hard', 'Seven trails and the strongest bugs.',
-          'outpost', '#b8b18f', '#9f987b', '#eddbac', 1.7, 3800, 'dust'),
-)
+    kind: str
+    details: str = ""
+    secret: bool = False
 
 
 @dataclass
-class Engineer:
-    x: float = 14.5
-    y: float = 13.6
-    vx: float = 0.
-    vy: float = 0.
-    angle: float = -math.pi/2
-    stride: float = 0.
-    contact_cooldown: float = 0.
-    stagger: float = 0.
-    tool_time: float = 0.
+class Agent:
+    x: float
+    y: float
+    facing: str = "down"
+    vx: float = 0.0
+    vy: float = 0.0
+    frame: float = 0.0
     moving: bool = False
-    working: bool = False
-    tool_target: tuple | None = None
+    coat: int = 0
+    hair: int = 0
+    skin: int = 0
+    hat: bool = False
+    accessory: int = 0
 
     @property
-    def pos(self):
+    def feet(self):
         return self.x, self.y
 
 
 @dataclass
-class WorkOrder:
-    x: int
-    y: int
-    kind: int
-    duration: float
-    progress: float = 0.
-    task: str = 'build'
-    path: int = -1
-    cost: int = 0
-    paid_materials: dict = field(default_factory=dict)
-    name: str = ''
-
-    @property
-    def pos(self):
-        return self.x+.5, self.y+.5
-
-    @property
-    def fraction(self):
-        return min(1., self.progress / max(.1, self.duration))
+class Level:
+    chapter: int
+    theme: str
+    props: list[tuple]
+    collisions: list[tuple[float, float, float, float]]
+    objects: list[Item]
+    witness: Agent
+    killer: Agent
+    civilians: list[Agent]
+    hide_positions: list[tuple[float, float]]
+    blend_zones: list[tuple[float, float, float]]
+    patrol: list[tuple[float, float]]
+    start: tuple[float, float]
+    cards: list[str]
 
 
-class Foundation(Building):
-    @property
-    def role(self):
-        return 'wall'
 
-    @property
-    def spec(self):
-        return dict(SPECS[self.kind], power=0)
+# Suspicion is NOT a world-wide switch. These distinct secure locations are
+# the only portions of a chapter where surveillance creates active danger.
+# The rest of the map is a public investigation space: there are real witnesses,
+# nobody attacks you for walking near the evidence, and you can reason at leisure.
+INVESTIGATION_STAKES = [
+    ("Collins forged the time of death to make the house servants accuse one another.",
+     "The family solicitor has been bought. Collins plans to silence the housemaid who saw his boots at the study door.",
+     "Your clock reconstruction, his boot print, and the trust letter prove a staged alibi, access, and motive."),
+    ("Vale did not vanish accidentally. The false punch and rewritten shift roster isolate Ada's movements.",
+     "The station police answer to the manifest's owners; Ada is about to destroy the list and identify the surviving porter.",
+     "The obsolete punch, witness account, and altered roster put Ada alone in the carriage."),
+    ("Rowan was being kept in the hotel as a patient against his will.",
+     "Fenwick controls the doctor's certificates and the local constables. Another patient is being moved tonight.",
+     "The duplicate key, fabricated treatment bill, and bell log show exactly how he staged the sealed room."),
+    ("Celeste's recorded testimony was the danger, not her performance.",
+     "Rook controls every exit backstage and has ordered the film burned after tonight's final curtain.",
+     "The revised cue, matching fiber, and emptied reel canister connect Rook to the blackout and theft."),
+    ("Someone burned only the records that could challenge the Blackwell family's official history.",
+     "Voss is ordering a second fire. The archivist's assistant is locked in the building with the replacement books.",
+     "The targeted register, unique signet, and arcade route establish both the order and the escape."),
+    ("Iris's plant was an address disguised as a specimen number.",
+     "Wren hired armed men to retrieve the final botanical notebook; the gardener is still trapped in the glasshouse.",
+     "The inward glass, early inventory removal, and Iris's final letter identify her sponsor as the intruder."),
+    ("The wrong tide makes the entire official drowning report impossible.",
+     "Pike has arranged for another courier to disappear on the departing launch while the harbor patrol looks away.",
+     "The contrary current, rope braid, and forged docket identify the private launch and its master."),
+    ("Grey was using the dome to watch people, not stars.",
+     "Crane is sealing the observatory as a witness arrives; the only surviving guest book will be destroyed at dawn.",
+     "The telescope angle, sabotaged gear, and erased attendance log point to Crane's concealment."),
+    ("Judge Harrow had the original verdict. Blythe replaced it with a fiction.",
+     "The courthouse guards have orders to return every witness to Blythe. The restored pages must leave before lockdown.",
+     "The mismatched transcript, her authorization, and the dustless passage identify who changed the file."),
+    ("All nine tokens arrange into a floor plan. Evelyn placed them along your route deliberately.",
+     "Evelyn's final command is to eliminate you and burn the case archive. She has already sent her guards to the crypt.",
+     "The token map, the founder's portrait, and the recorded confession establish her command over the chain of deaths."),
+]
 
-    def stats(self):
-        return {'hp': 220, 'range': 0}
+@dataclass
+class PatrolGuard:
+    """A real guard, rather than a sprite with an omniscient proximity trigger."""
+    actor: Agent
+    route: list[tuple[float, float]]
+    rank: str = "security"
+    waypoint: int = 0
+    mode: str = "patrol"                 # patrol, curious, investigate, search, pursue
+    notice: float = 0.0
+    linger: float = 0.0
+    last_known: Optional[tuple[float, float]] = None
+    path: list[tuple[float, float]] = field(default_factory=list)
+    path_goal: Optional[tuple[float, float]] = None
+    repath: float = 0.0
+    scan_clock: float = 0.0
+    search_turns: int = 0
+    warned: bool = False
+
+# TEN CHAPTERS / THIRTY DISTINCT REASONING TECHNIQUES
+METHODS = [   ('Chronology', 'Compare timestamps to expose a false timeline.'),
+    ('Contradiction', 'Find two claims that cannot both be true.'),
+    ('Trace analysis', 'Connect a physical trace to its source.'),
+    ('Alibi testing', "Cross-check a suspect's stated location."),
+    ('Document authentication', 'Identify a forged or altered document.'),
+    ('Motive mapping', 'Follow who benefits from the crime.'),
+    ('Spatial inference', 'Infer movement from room layout.'),
+    ('Witness triangulation', 'Reconcile conflicting eyewitness accounts.'),
+    ('Cipher breaking', 'Decode a concealed message.'),
+    ('Opportunity analysis', 'Establish access at the critical moment.'),
+    ('Pattern recognition', 'Spot a repeated signature across incidents.'),
+    ('Forensic comparison', 'Compare marks left by objects or tools.'),
+    ('Negative evidence', 'Reason from something conspicuously absent.'),
+    ('Behavioral profiling', 'Compare conduct to known habits.'),
+    ('Ledger reconciliation', 'Find a financial discrepancy.'),
+    ('Route reconstruction', "Rebuild a suspect's path."),
+    ('Sound localization', 'Locate a sound through testimony.'),
+    ('Material identification', 'Recognize a rare substance or fabric.'),
+    ('Chain of custody', 'Track who handled an item.'),
+    ('Codebook inference', 'Derive meaning from a recurring symbol.'),
+    ('Probability elimination', 'Discard incompatible explanations.'),
+    ('Security bypass analysis', 'Determine how safeguards failed.'),
+    ('Testimony sequencing', 'Put recollections into proper order.'),
+    ('Network analysis', 'Expose hidden associations between people.'),
+    ('Chemical residue', 'Interpret safe, non-actionable lab residue.'),
+    ('Handwriting comparison', 'Match distinctive letter forms.'),
+    ('Mechanical reconstruction', 'Infer how a mechanism was manipulated.'),
+    ('Identity verification', 'Compare claimed identity against records.'),
+    ('Deception detection', 'Recognize a deliberately staged scene.'),
+    ('Synthesis', 'Unite separate cases into one theory.')]
+
+CHAPTERS = [   {   'title': 'The Manor',
+        'place': 'Blackwell Manor',
+        'victim': 'Albert Blackwell',
+        'culprit': 'Mr. Collins',
+        'role': 'the estate steward',
+        'motive': 'his fear that Albert had discovered years of theft',
+        'scene': 'manor',
+        'threat': 'A storm batters the estate while someone inside keeps extinguishing lamps one by '
+                  'one.',
+        'intro': [   'The Blackwell family has money, enemies, and a talent for silence.',
+                     'Tonight the patriarch Albert Blackwell lies dead in his study while thunder '
+                     'drowns every scream.',
+                     'A woman calling herself Lady Evelyn presses a silver moth token into your '
+                     "hand and whispers: 'Do not trust the clocks.'"],
+        'reveal': 'Collins breaks when cornered. He admits the killing, but swears he was only the '
+                  'first hand used by a hidden patron.',
+        'aftermath': 'Inside his coat you find another silver moth and a ledger page naming a '
+                     'midnight delivery at Ashcroft Station.',
+        'witness': 'I heard the study door open long after the grandfather clock stopped. Someone '
+                   'wanted us all staring at the wrong hour.',
+        'clues': [   (   'Broken Clock',
+                         'The study clock froze at 9:30, but the mainspring was deliberately '
+                         'jammed.'),
+                     (   'Crescent Footprints',
+                         'Wet prints from the garden entrance show a crescent heel gouge.'),
+                     (   'Burned Trust Letter',
+                         'A half-burned notice demands missing trust funds be restored before '
+                         'dawn.')],
+        'questions': [   (   'Was the clock an honest timestamp?',
+                             'Broken Clock',
+                             'No. The clock was staged to create a false time of death.'),
+                         (   'Who entered through the garden?',
+                             'Crescent Footprints',
+                             "Collins's boots share the same crescent-cut heel."),
+                         (   'Why was Albert silenced?',
+                             'Burned Trust Letter',
+                             "Albert was about to expose Collins's embezzlement.")],
+        'cinematic': [   'I knew Albert Blackwell before I knew how to tell a convincing lie. He '
+                         'had three fears. Thunder was not one of them.',
+                         'The power fails. A gunshot is reported by the maid, but the body bears no '
+                         'gunshot wound.',
+                         'The family portrait above the stairs has been moved by half an inch. A '
+                         'space is visible where a second portrait once hung.',
+                         'Evelyn arrives before the constables. She has no umbrella and not a drop '
+                         'of rain on her coat.',
+                         "A whisper slips beneath the study door: 'He kept two ledgers. One for his "
+                         "friends, one for his family.'",
+                         'You find the broken clock, still ticking inside despite the hands being '
+                         'stopped at half past nine.',
+                         'A house full of people might have heard a scream. Every one of them '
+                         'claims to have heard the storm instead.',
+                         'Collins does not deny entering the study. He denies knowing what time it '
+                         'was, then quotes the stopped clock exactly.',
+                         'The first silver moth is cold in your hand. Its wings fit a notch carved '
+                         'into the study desk.',
+                         'An unsigned letter ends with three words: KEEP THEM QUIET.',
+                         'Lady Evelyn asks whether you believe the dead deserve justice, or merely '
+                         'a better story.',
+                         'When you confront Collins, his first question is not whether you have '
+                         'evidence. It is whether Evelyn is nearby.'],
+        'supporting': ['Margot', 'Edmund'],
+        'room_name': 'West Gallery',
+        'discovery_moments': [   'A small detail catches the light differently the second time you look.',
+                                 'You turn the item over slowly. Its meaning changes when you '
+                                 'remember what the witness said.',
+                                 'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
+        'dialogue': [   {   'speaker': 'Margot',
+                            'text': 'I knew Albert Blackwell. They were frightened in the days '
+                                    'before the murder. I keep thinking I should have said '
+                                    'something.'},
+                        {   'speaker': 'Detective',
+                            'text': 'Start from the last moment you saw them alive. Leave nothing '
+                                    'out, even what seems unimportant.'},
+                        {   'speaker': 'Margot',
+                            'text': 'I heard the study door open long after the grandfather clock '
+                                    'stopped. Someone wanted us all staring at the wrong hour.'},
+                        {   'speaker': 'Detective',
+                            'text': 'And who else knew you would be here tonight?'},
+                        {   'speaker': 'Margot',
+                            'text': 'There was a message with a silver moth on the seal. I thought '
+                                    'it was a family emblem.'},
+                        {   'speaker': 'Detective',
+                            'text': 'This is the tenth time someone has told me that. Not one of '
+                                    'them looked relieved.'},
+                        {   'speaker': 'Edmund',
+                            'text': 'The people who run this place have been told to pretend they '
+                                    'remember nothing.'},
+                        {   'speaker': 'Edmund',
+                            'text': 'Even if I told you what I saw, I doubt you would believe who '
+                                    'told me to stay silent.'},
+                        {   'speaker': 'Detective',
+                            'text': "I will decide what the evidence can support. I won't decide "
+                                    "before I've seen it."},
+                        {   'speaker': 'Margot',
+                            'text': "Then search the room. You may find the truth, but it won't "
+                                    'make this night easier.'}],
+        'suspect_speech': [   'You should have stayed away from Blackwell Manor. People who dig '
+                              'beneath a family usually find graves.',
+                              "I won't pretend I cared about Albert Blackwell. But you don't know "
+                              'who truly wanted this done.',
+                              "The silver moth is not a symbol of loyalty. It's a reminder that "
+                              'someone can always see the light you stand in.',
+                              'Ask Evelyn why your case file already existed before the murder was '
+                              'reported.'],
+        'deduction_decoys': [   [   'The damage was an ordinary accident at Blackwell Manor.',
+                                    'A stranger without access arrived after everyone left.'],
+                                [   'The witness mistook a harmless visitor for the suspect.',
+                                    'There is no reliable way to link the trace to any person.'],
+                                [   'The motive was a spontaneous argument unrelated to the '
+                                    'evidence.',
+                                    'The paperwork is genuine and the loss has no connection to the '
+                                    'death.']],
+        'journal_lore': [   'CASE 01 — THE MANOR',
+                            'Location of inquiry: Blackwell Manor',
+                            'Deceased: Albert Blackwell',
+                            'Current testimony suggests the public story about the death is '
+                            'incomplete.',
+                            'A silver moth token appears in the evidence chain yet again.',
+                            'The Blackwell family seems linked to the scene through a person, a '
+                            'document, or a piece of land.',
+                            "The night guard's patrol changes whenever anyone raises an alarm.",
+                            'The witness seems afraid of a threat beyond the murderer in this room.',
+                            'A false conclusion here could conceal evidence needed to unlock the '
+                            'next case.',
+                            'Only properly supported deductions can form the final accusation.'],
+        'suspect_alias': 'Mr. Collins'},
+    {   'title': 'The Midnight Train',
+        'place': 'Ashcroft Station',
+        'victim': 'Conductor Vale',
+        'culprit': 'Ada Mercer',
+        'role': 'a railway clerk',
+        'motive': 'to recover a passenger manifest tied to the Lantern network',
+        'scene': 'train',
+        'threat': 'Fog, steam, and the crush of travelers make it easy for someone to vanish '
+                  'between carriages.',
+        'intro': [   'The station master swears the train never stopped, yet a body disappeared all '
+                     'the same.',
+                     "Conductor Vale's lantern was found swinging from an empty caboose and a "
+                     "ticket was punched for a station that hasn't existed in thirty years.",
+                     "In Collins's pocket ledger, Ashcroft Station was circled twice in red ink."],
+        'reveal': 'Ada confesses she strangled Vale for the manifest, but claims the names on it '
+                  'frightened her more than the murder itself.',
+        'aftermath': "The manifest includes a physician from the Hollow Hotel and a note: 'Room 13 "
+                     "must remain sealed.'",
+        'witness': 'The woman in the blue coat stepped off after the bell, not before it. She '
+                   'walked like she already knew no one would stop her.',
+        'clues': [   (   'Obsolete Punch Mark',
+                         "The ticket was punched by a retired station tool kept in the clerk's "
+                         'office.'),
+                     (   "Porter's Statement",
+                         'A porter saw a woman in a blue coat leave after final departure.'),
+                     (   'Forged Shift Roster',
+                         "Ada's shift log was written with fresh ink over dried columns.")],
+        'questions': [   (   'Could the ticket have been punched on the train?',
+                             'Obsolete Punch Mark',
+                             'No. It came from a retired punch only Ada could access.'),
+                         (   'Who was seen leaving the carriage?',
+                             "Porter's Statement",
+                             'The porter identified Ada by her distinctive blue coat.'),
+                         (   "Does Ada's alibi survive scrutiny?",
+                             'Forged Shift Roster',
+                             'No. The roster was altered after the train had departed.')],
+        'cinematic': [   'The last train to Ashcroft is delayed by a signal nobody admits sending.',
+                         'Every passenger remembers a different conductor. Only the ticket stubs '
+                         'agree on his name.',
+                         "A child's toy clock ticks inside the empty compartment; its hands have no "
+                         'face.',
+                         'A whistle cuts through the fog, long after the rails should be silent.',
+                         'A woman in blue moves against the flow of passengers, carefully avoiding '
+                         'the station lamps.',
+                         "The punch mark is shaped like a moth's split wing. Its ink is older than "
+                         'the ticket.',
+                         'The porter insists he saw Ada. He refuses to say who ordered him to keep '
+                         'quiet.',
+                         'A manifest lists three passengers under names belonging to people buried '
+                         'years ago.',
+                         'Your own name appears in the luggage registry with the wrong date of '
+                         'birth.',
+                         'Behind the station wall, someone has scratched: THE TRACKS ONLY RUN IN '
+                         'ONE DIRECTION.',
+                         'Ada asks if a list of names can be a weapon. She does not wait for your '
+                         'answer.',
+                         'A train passes without stopping. In every window is a face you think you '
+                         'recognize.'],
+        'supporting': ['Porter Finch', 'Station Guard'],
+        'room_name': 'Platform Nine',
+        'discovery_moments': [   'A small detail catches the light differently the second time you look.',
+                                 'You turn the item over slowly. Its meaning changes when you '
+                                 'remember what the witness said.',
+                                 'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
+        'dialogue': [   {   'speaker': 'Porter Finch',
+                            'text': 'I knew Conductor Vale. They were frightened in the days before '
+                                    'the murder. I keep thinking I should have said something.'},
+                        {   'speaker': 'Detective',
+                            'text': 'Start from the last moment you saw them alive. Leave nothing '
+                                    'out, even what seems unimportant.'},
+                        {   'speaker': 'Porter Finch',
+                            'text': 'The woman in the blue coat stepped off after the bell, not '
+                                    'before it. She walked like she already knew no one would stop '
+                                    'her.'},
+                        {   'speaker': 'Detective',
+                            'text': 'And who else knew you would be here tonight?'},
+                        {   'speaker': 'Porter Finch',
+                            'text': 'There was a message with a silver moth on the seal. I thought '
+                                    'it was a family emblem.'},
+                        {   'speaker': 'Detective',
+                            'text': 'This is the tenth time someone has told me that. Not one of '
+                                    'them looked relieved.'},
+                        {   'speaker': 'Station Guard',
+                            'text': 'The people who run this place have been told to pretend they '
+                                    'remember nothing.'},
+                        {   'speaker': 'Station Guard',
+                            'text': 'Even if I told you what I saw, I doubt you would believe who '
+                                    'told me to stay silent.'},
+                        {   'speaker': 'Detective',
+                            'text': "I will decide what the evidence can support. I won't decide "
+                                    "before I've seen it."},
+                        {   'speaker': 'Porter Finch',
+                            'text': "Then search the room. You may find the truth, but it won't "
+                                    'make this night easier.'}],
+        'suspect_speech': [   'You should have stayed away from Ashcroft Station. People who dig '
+                              'beneath a family usually find graves.',
+                              "I won't pretend I cared about Conductor Vale. But you don't know who "
+                              'truly wanted this done.',
+                              "The silver moth is not a symbol of loyalty. It's a reminder that "
+                              'someone can always see the light you stand in.',
+                              'Ask Evelyn why your case file already existed before the murder was '
+                              'reported.'],
+        'deduction_decoys': [   [   'The damage was an ordinary accident at Ashcroft Station.',
+                                    'A stranger without access arrived after everyone left.'],
+                                [   'The witness mistook a harmless visitor for the suspect.',
+                                    'There is no reliable way to link the trace to any person.'],
+                                [   'The motive was a spontaneous argument unrelated to the '
+                                    'evidence.',
+                                    'The paperwork is genuine and the loss has no connection to the '
+                                    'death.']],
+        'journal_lore': [   'CASE 02 — THE MIDNIGHT TRAIN',
+                            'Location of inquiry: Ashcroft Station',
+                            'Deceased: Conductor Vale',
+                            'Current testimony suggests the public story about the death is '
+                            'incomplete.',
+                            'A silver moth token appears in the evidence chain yet again.',
+                            'The Blackwell family seems linked to the scene through a person, a '
+                            'document, or a piece of land.',
+                            "The night guard's patrol changes whenever anyone raises an alarm.",
+                            'The witness seems afraid of a threat beyond the murderer in this room.',
+                            'A false conclusion here could conceal evidence needed to unlock the '
+                            'next case.',
+                            'Only properly supported deductions can form the final accusation.'],
+        'suspect_alias': 'Ada Mercer'},
+    {   'title': 'The Hollow Hotel',
+        'place': 'Hollow Hotel',
+        'victim': 'Guest Rowan',
+        'culprit': 'Dr. Fenwick',
+        'role': 'the resident physician',
+        'motive': 'to conceal brutal experiments financed by the Lantern',
+        'scene': 'hotel',
+        'threat': 'Every corridor looks identical, every bell seems to ring from nowhere, and Room '
+                  '13 feels occupied even when empty.',
+        'intro': [   'At the Hollow Hotel, curtains remain drawn at noon and no guest asks for '
+                     'fresh towels twice.',
+                     'Rowan, a guest who requested police protection, is gone from a room bolted '
+                     'from within.',
+                     "Under the bed, you find the next silver moth and the words: 'A doctor can "
+                     "turn fear into obedience.'"],
+        'reveal': 'Fenwick collapses under questioning and points toward a recording stolen at the '
+                  'Gilded Theater—evidence he says could destroy the entire order.',
+        'aftermath': 'You recover a coded patient ledger and the reel number of a film hidden in '
+                     'the theater district.',
+        'witness': 'The bell rang from the hall after Rowan disappeared. I know because I had '
+                   'already collected the supper tray.',
+        'clues': [   (   'Duplicate Key Wax',
+                         'Wax impressions inside the lock preserve the outline of a second key.'),
+                     (   'False Medical Bill',
+                         'A hidden account lists treatments Rowan never authorized.'),
+                     (   'Bell Log',
+                         'The service bell rang after Rowan should already have been dead.')],
+        'questions': [   (   'How was the locked room illusion created?',
+                             'Duplicate Key Wax',
+                             'A duplicate key allowed Fenwick to enter and re-lock the room.'),
+                         (   'What was Fenwick hiding?',
+                             'False Medical Bill',
+                             'The bill concealed unauthorized treatments and extortion.'),
+                         (   "Who faked the victim's final timeline?",
+                             'Bell Log',
+                             'Fenwick rang the service bell from the hall after the murder.')],
+        'cinematic': [   'Room thirteen has been rented every Tuesday for nineteen years. The '
+                         'signatures are identical.',
+                         'The concierge refuses to call the missing guest by their name.',
+                         'A second key clinks in the ice bucket, though the ice has melted hours '
+                         'ago.',
+                         'The corridor mirror reflects a lamp that was extinguished yesterday.',
+                         'One guest remembers a scream. Another remembers a lullaby.',
+                         'In the basement an examination table lies beneath a sheet too clean for '
+                         'the room.',
+                         'The medical bills name treatments nobody remembers receiving.',
+                         "The physician's handwriting changes halfway through his notebook.",
+                         'Room thirteen smells faintly of burnt sugar and something chemical.',
+                         'Rowan sent a letter to Evelyn two days before the murder. Evelyn never '
+                         'mentioned it.',
+                         'A sealed envelope contains the single word: THEATER.',
+                         'Someone has been listening at the walls. The service bell rings once, '
+                         'then once more.'],
+        'supporting': ['Concierge Hale', 'Bellhop Owen'],
+        'room_name': 'East Corridor',
+        'discovery_moments': [   'A small detail catches the light differently the second time you look.',
+                                 'You turn the item over slowly. Its meaning changes when you '
+                                 'remember what the witness said.',
+                                 'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
+        'dialogue': [   {   'speaker': 'Concierge Hale',
+                            'text': 'I knew Guest Rowan. They were frightened in the days before '
+                                    'the murder. I keep thinking I should have said something.'},
+                        {   'speaker': 'Detective',
+                            'text': 'Start from the last moment you saw them alive. Leave nothing '
+                                    'out, even what seems unimportant.'},
+                        {   'speaker': 'Concierge Hale',
+                            'text': 'The bell rang from the hall after Rowan disappeared. I know '
+                                    'because I had already collected the supper tray.'},
+                        {   'speaker': 'Detective',
+                            'text': 'And who else knew you would be here tonight?'},
+                        {   'speaker': 'Concierge Hale',
+                            'text': 'There was a message with a silver moth on the seal. I thought '
+                                    'it was a family emblem.'},
+                        {   'speaker': 'Detective',
+                            'text': 'This is the tenth time someone has told me that. Not one of '
+                                    'them looked relieved.'},
+                        {   'speaker': 'Bellhop Owen',
+                            'text': 'The people who run this place have been told to pretend they '
+                                    'remember nothing.'},
+                        {   'speaker': 'Bellhop Owen',
+                            'text': 'Even if I told you what I saw, I doubt you would believe who '
+                                    'told me to stay silent.'},
+                        {   'speaker': 'Detective',
+                            'text': "I will decide what the evidence can support. I won't decide "
+                                    "before I've seen it."},
+                        {   'speaker': 'Concierge Hale',
+                            'text': "Then search the room. You may find the truth, but it won't "
+                                    'make this night easier.'}],
+        'suspect_speech': [   'You should have stayed away from Hollow Hotel. People who dig '
+                              'beneath a family usually find graves.',
+                              "I won't pretend I cared about Guest Rowan. But you don't know who "
+                              'truly wanted this done.',
+                              "The silver moth is not a symbol of loyalty. It's a reminder that "
+                              'someone can always see the light you stand in.',
+                              'Ask Evelyn why your case file already existed before the murder was '
+                              'reported.'],
+        'deduction_decoys': [   [   'The damage was an ordinary accident at Hollow Hotel.',
+                                    'A stranger without access arrived after everyone left.'],
+                                [   'The witness mistook a harmless visitor for the suspect.',
+                                    'There is no reliable way to link the trace to any person.'],
+                                [   'The motive was a spontaneous argument unrelated to the '
+                                    'evidence.',
+                                    'The paperwork is genuine and the loss has no connection to the '
+                                    'death.']],
+        'journal_lore': [   'CASE 03 — THE HOLLOW HOTEL',
+                            'Location of inquiry: Hollow Hotel',
+                            'Deceased: Guest Rowan',
+                            'Current testimony suggests the public story about the death is '
+                            'incomplete.',
+                            'A silver moth token appears in the evidence chain yet again.',
+                            'The Blackwell family seems linked to the scene through a person, a '
+                            'document, or a piece of land.',
+                            "The night guard's patrol changes whenever anyone raises an alarm.",
+                            'The witness seems afraid of a threat beyond the murderer in this room.',
+                            'A false conclusion here could conceal evidence needed to unlock the '
+                            'next case.',
+                            'Only properly supported deductions can form the final accusation.'],
+        'suspect_alias': 'Dr. Fenwick'},
+    {   'title': 'The Gilded Theater',
+        'place': 'Gilded Theater',
+        'victim': 'Singer Celeste',
+        'culprit': 'Victor Rook',
+        'role': 'the stage manager',
+        'motive': 'to suppress a recording naming Lantern trustees',
+        'scene': 'theater',
+        'threat': 'Crowds applaud while somebody backstage prepares another death behind velvet '
+                  'curtains.',
+        'intro': [   'Theater folk lie with style, but their props usually tell the truth.',
+                     "Celeste dies during a blackout timed to the final bow, and the night's master "
+                     'reel vanishes with her final note.',
+                     'In the wings you find another moth token pinned beneath a cue sheet.'],
+        'reveal': 'Rook admits engineering the blackout and says the missing reel names the people '
+                  'who funded every death so far.',
+        'aftermath': 'Taped beneath the empty canister is a list of trustees and a registry code '
+                     'tied to the Old Quarter archives.',
+        'witness': "The stage went dark a breath too early. Only the manager's cue sheet ever "
+                   'leaves no room for improvisation.',
+        'clues': [   (   'Blackout Cue',
+                         "An additional blackout note was penciled into the manager's master cue "
+                         'sheet.'),
+                     (   'Velvet Fiber',
+                         "Red velvet threads from Rook's sleeve cling to the trapdoor latch."),
+                     (   'Hollow Film Canister',
+                         'The canister is empty, but a hidden list of names is taped underneath '
+                         'it.')],
+        'questions': [   (   'Who controlled the blackout?',
+                             'Blackout Cue',
+                             'Rook inserted the unauthorized lighting cue himself.'),
+                         (   'Who reached the trapdoor?',
+                             'Velvet Fiber',
+                             "The trapdoor snagged fibers from Rook's jacket sleeve."),
+                         (   'Why was Celeste killed?',
+                             'Hollow Film Canister',
+                             'She had evidence naming Lantern trustees on the stolen reel.')],
+        'cinematic': [   'The applause goes on after the lights cut out, as if the audience cannot '
+                         'bear to hear silence.',
+                         "Celeste's final line was changed on the night of her death. Her "
+                         'understudy cannot say who changed it.',
+                         'The stage manager carries two cue sheets. One contains a blackout nobody '
+                         'rehearsed.',
+                         'A red velvet thread catches on a brass latch beneath the boards.',
+                         'Backstage, a phonograph plays a voice repeating a list of surnames.',
+                         'The projectionist says someone swapped reels during the third act.',
+                         "A torn ticket in the wings bears the crest of the city's oldest court.",
+                         'The director calls it an accident. He is smiling when he says it.',
+                         'A masked performer follows you between the curtains, then vanishes into '
+                         'the wings.',
+                         'The hidden list in the canister contains one family name twice.',
+                         'Evelyn appears in a private balcony reserved for empty seats.',
+                         'The house lights rise. No one has the courage to applaud.'],
+        'supporting': ['Understudy Rose', 'Projectionist Lin'],
+        'room_name': 'Stage Wings',
+        'discovery_moments': [   'A small detail catches the light differently the second time you look.',
+                                 'You turn the item over slowly. Its meaning changes when you '
+                                 'remember what the witness said.',
+                                 'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
+        'dialogue': [   {   'speaker': 'Understudy Rose',
+                            'text': 'I knew Singer Celeste. They were frightened in the days before '
+                                    'the murder. I keep thinking I should have said something.'},
+                        {   'speaker': 'Detective',
+                            'text': 'Start from the last moment you saw them alive. Leave nothing '
+                                    'out, even what seems unimportant.'},
+                        {   'speaker': 'Understudy Rose',
+                            'text': "The stage went dark a breath too early. Only the manager's cue "
+                                    'sheet ever leaves no room for improvisation.'},
+                        {   'speaker': 'Detective',
+                            'text': 'And who else knew you would be here tonight?'},
+                        {   'speaker': 'Understudy Rose',
+                            'text': 'There was a message with a silver moth on the seal. I thought '
+                                    'it was a family emblem.'},
+                        {   'speaker': 'Detective',
+                            'text': 'This is the tenth time someone has told me that. Not one of '
+                                    'them looked relieved.'},
+                        {   'speaker': 'Projectionist Lin',
+                            'text': 'The people who run this place have been told to pretend they '
+                                    'remember nothing.'},
+                        {   'speaker': 'Projectionist Lin',
+                            'text': 'Even if I told you what I saw, I doubt you would believe who '
+                                    'told me to stay silent.'},
+                        {   'speaker': 'Detective',
+                            'text': "I will decide what the evidence can support. I won't decide "
+                                    "before I've seen it."},
+                        {   'speaker': 'Understudy Rose',
+                            'text': "Then search the room. You may find the truth, but it won't "
+                                    'make this night easier.'}],
+        'suspect_speech': [   'You should have stayed away from Gilded Theater. People who dig '
+                              'beneath a family usually find graves.',
+                              "I won't pretend I cared about Singer Celeste. But you don't know who "
+                              'truly wanted this done.',
+                              "The silver moth is not a symbol of loyalty. It's a reminder that "
+                              'someone can always see the light you stand in.',
+                              'Ask Evelyn why your case file already existed before the murder was '
+                              'reported.'],
+        'deduction_decoys': [   [   'The damage was an ordinary accident at Gilded Theater.',
+                                    'A stranger without access arrived after everyone left.'],
+                                [   'The witness mistook a harmless visitor for the suspect.',
+                                    'There is no reliable way to link the trace to any person.'],
+                                [   'The motive was a spontaneous argument unrelated to the '
+                                    'evidence.',
+                                    'The paperwork is genuine and the loss has no connection to the '
+                                    'death.']],
+        'journal_lore': [   'CASE 04 — THE GILDED THEATER',
+                            'Location of inquiry: Gilded Theater',
+                            'Deceased: Singer Celeste',
+                            'Current testimony suggests the public story about the death is '
+                            'incomplete.',
+                            'A silver moth token appears in the evidence chain yet again.',
+                            'The Blackwell family seems linked to the scene through a person, a '
+                            'document, or a piece of land.',
+                            "The night guard's patrol changes whenever anyone raises an alarm.",
+                            'The witness seems afraid of a threat beyond the murderer in this room.',
+                            'A false conclusion here could conceal evidence needed to unlock the '
+                            'next case.',
+                            'Only properly supported deductions can form the final accusation.'],
+        'suspect_alias': 'Victor Rook'},
+    {   'title': 'The Old Quarter',
+        'place': 'Old Quarter Archives',
+        'victim': 'Archivist Bell',
+        'culprit': 'Nora Voss',
+        'role': 'the city registrar',
+        'motive': 'to erase the true Blackwell bloodline from public record',
+        'scene': 'quarter',
+        'threat': 'Firelight and ash hide a second crime scene among alleys that seem to rearrange '
+                  'themselves.',
+        'intro': [   'When records burn, somebody profits from forgetting.',
+                     'A controlled blaze destroys one wall of the municipal archive, yet the flames '
+                     'somehow spared a single family register.',
+                     "Bell dies clutching a scrap of genealogy and the phrase: 'The first branch "
+                     "was cut on purpose.'"],
+        'reveal': 'Voss swears she erased the line because it pointed to a woman who built the '
+                  'Lantern long before the murders began.',
+        'aftermath': 'The surviving branch leads to a Blackwell matriarch and to a conservatory '
+                     'donor named Silas Wren.',
+        'witness': 'Only those pages burned. The rest of the room smoked, but the Blackwell indexes '
+                   'vanished like they had been selected first.',
+        'clues': [   (   'Charred Register',
+                         'The destroyed pages all indexed Blackwell family births and marriages.'),
+                     (   'Private Seal Fragment',
+                         "A wax seal from a private registrar's signet was left near the ash pan."),
+                     (   'Arcade Sketch',
+                         'A witness drew the escape route through the market arcade to a '
+                         "registrar's side entrance.")],
+        'questions': [   (   'Which records were actually targeted?',
+                             'Charred Register',
+                             'The fire focused on the Blackwell lineage pages.'),
+                         (   'Who authorized their destruction?',
+                             'Private Seal Fragment',
+                             "The seal belongs to Nora Voss's private signet."),
+                         (   'How did the culprit escape unseen?',
+                             'Arcade Sketch',
+                             "The sketch traces directly back to Voss's office entrance.")],
+        'cinematic': [   'The archive is burning, but the fire follows the shelves like it can '
+                         'read.',
+                         "A registrar's seal rolls across the ash and comes to rest at your shoe.",
+                         'Archivist Bell left a scrap showing a marriage entered twice under two '
+                         'different names.',
+                         'A door to the arcade was locked from the outside, then opened with a key '
+                         'from within.',
+                         'The smoke hides a silhouette on the mezzanine, motionless and watching.',
+                         "The city historian will not speak until the mayor's carriage leaves.",
+                         'Old portraits show a Blackwell child who is absent from the family tree.',
+                         'A witness sketches the alley from memory, including a shutter painted '
+                         'shut years ago.',
+                         'Nora Voss keeps a ledger of every name she has erased.',
+                         'For the first time, you wonder whether Albert was ever the head of his '
+                         'own house.',
+                         'A scorched page contains a family motto: WHAT IS UNWRITTEN CANNOT DIE.',
+                         'A bell rings twelve times from a tower that has no working clock.'],
+        'supporting': ['Mrs. Alder', 'Watchman Fox'],
+        'room_name': 'Archive Gallery',
+        'discovery_moments': [   'A small detail catches the light differently the second time you look.',
+                                 'You turn the item over slowly. Its meaning changes when you '
+                                 'remember what the witness said.',
+                                 'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
+        'dialogue': [   {   'speaker': 'Mrs. Alder',
+                            'text': 'I knew Archivist Bell. They were frightened in the days before '
+                                    'the murder. I keep thinking I should have said something.'},
+                        {   'speaker': 'Detective',
+                            'text': 'Start from the last moment you saw them alive. Leave nothing '
+                                    'out, even what seems unimportant.'},
+                        {   'speaker': 'Mrs. Alder',
+                            'text': 'Only those pages burned. The rest of the room smoked, but the '
+                                    'Blackwell indexes vanished like they had been selected first.'},
+                        {   'speaker': 'Detective',
+                            'text': 'And who else knew you would be here tonight?'},
+                        {   'speaker': 'Mrs. Alder',
+                            'text': 'There was a message with a silver moth on the seal. I thought '
+                                    'it was a family emblem.'},
+                        {   'speaker': 'Detective',
+                            'text': 'This is the tenth time someone has told me that. Not one of '
+                                    'them looked relieved.'},
+                        {   'speaker': 'Watchman Fox',
+                            'text': 'The people who run this place have been told to pretend they '
+                                    'remember nothing.'},
+                        {   'speaker': 'Watchman Fox',
+                            'text': 'Even if I told you what I saw, I doubt you would believe who '
+                                    'told me to stay silent.'},
+                        {   'speaker': 'Detective',
+                            'text': "I will decide what the evidence can support. I won't decide "
+                                    "before I've seen it."},
+                        {   'speaker': 'Mrs. Alder',
+                            'text': "Then search the room. You may find the truth, but it won't "
+                                    'make this night easier.'}],
+        'suspect_speech': [   'You should have stayed away from Old Quarter Archives. People who '
+                              'dig beneath a family usually find graves.',
+                              "I won't pretend I cared about Archivist Bell. But you don't know who "
+                              'truly wanted this done.',
+                              "The silver moth is not a symbol of loyalty. It's a reminder that "
+                              'someone can always see the light you stand in.',
+                              'Ask Evelyn why your case file already existed before the murder was '
+                              'reported.'],
+        'deduction_decoys': [   [   'The damage was an ordinary accident at Old Quarter Archives.',
+                                    'A stranger without access arrived after everyone left.'],
+                                [   'The witness mistook a harmless visitor for the suspect.',
+                                    'There is no reliable way to link the trace to any person.'],
+                                [   'The motive was a spontaneous argument unrelated to the '
+                                    'evidence.',
+                                    'The paperwork is genuine and the loss has no connection to the '
+                                    'death.']],
+        'journal_lore': [   'CASE 05 — THE OLD QUARTER',
+                            'Location of inquiry: Old Quarter Archives',
+                            'Deceased: Archivist Bell',
+                            'Current testimony suggests the public story about the death is '
+                            'incomplete.',
+                            'A silver moth token appears in the evidence chain yet again.',
+                            'The Blackwell family seems linked to the scene through a person, a '
+                            'document, or a piece of land.',
+                            "The night guard's patrol changes whenever anyone raises an alarm.",
+                            'The witness seems afraid of a threat beyond the murderer in this room.',
+                            'A false conclusion here could conceal evidence needed to unlock the '
+                            'next case.',
+                            'Only properly supported deductions can form the final accusation.'],
+        'suspect_alias': 'Nora Voss'},
+    {   'title': 'The Glass Conservatory',
+        'place': 'Glass Conservatory',
+        'victim': 'Botanist Iris',
+        'culprit': 'Silas Wren',
+        'role': 'a wealthy patron',
+        'motive': "to sell a discovery tied to the Lantern's meeting place",
+        'scene': 'conservatory',
+        'threat': 'Moonlight through shattered glass makes every shadow look like an intruder.',
+        'intro': [   'The conservatory should have smelled of earth and orchids. Instead it smells '
+                     'of rain and broken glass.',
+                     'Botanist Iris is found beside a smashed specimen cabinet, her hands stained '
+                     'green from a plant she died protecting.',
+                     "Pinned to a potting table is another moth token and a buyer's receipt torn in "
+                     'half.'],
+        'reveal': "Wren admits ordering the theft of Iris's specimen because it marked the route to "
+                  'the hidden docks used by the Lantern.',
+        'aftermath': "On the reverse of the buyer's receipt you find tide coordinates and the name "
+                     'Pike.',
+        'witness': 'She told me her sponsor smiled too easily. People who own glass houses should '
+                   'not carry stones in their pockets.',
+        'clues': [   (   'Inward Glass Fall',
+                         'The shards fell inward, proving the window was broken from outside.'),
+                     (   'Missing Inventory Slip',
+                         'One specimen was removed before the official audit began.'),
+                     (   'Betrayal Note',
+                         "Iris's final note says her own sponsor arranged the theft.")],
+        'questions': [   (   'Where did the intruder first enter?',
+                             'Inward Glass Fall',
+                             'The window was smashed from the garden side.'),
+                         (   'What was stolen before the murder?',
+                             'Missing Inventory Slip',
+                             "Wren arranged the specimen's removal ahead of the audit."),
+                         (   'Whom did Iris accuse?',
+                             'Betrayal Note',
+                             'The note identifies her sponsor, Silas Wren.')],
+        'cinematic': [   'The glasshouse turns moonlight into shards of pale blue, and every leaf '
+                         'casts a knife-like shadow.',
+                         'Botanist Iris died with soil beneath her nails and a pressed flower '
+                         'hidden under her tongue.',
+                         'One specimen is gone, yet the empty shelf contains fresh water from the '
+                         'docks.',
+                         "A sponsor's name has been scratched from a brass plaque.",
+                         'The greenhouse attendant saw someone leave through the gardens without '
+                         'using the path.',
+                         'A moth token hangs from the frame of a cracked pane.',
+                         'The surviving orchids have been watered with saltwater, which should have '
+                         'killed them.',
+                         "A half-written letter begins: 'Silas, the map is not a map.'",
+                         "The patron's carriage arrives and leaves with one more trunk than it came "
+                         'with.',
+                         'You hear a glass panel shift in the rafters. A shadow is keeping pace '
+                         'above you.',
+                         "The plant's roots trace the direction of a buried drainage channel.",
+                         "Iris's last words were about a ship, not a flower."],
+        'supporting': ['Attendant Vera', 'Groundskeeper Ned'],
+        'room_name': 'Glasshouse Walk',
+        'discovery_moments': [   'A small detail catches the light differently the second time you look.',
+                                 'You turn the item over slowly. Its meaning changes when you '
+                                 'remember what the witness said.',
+                                 'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
+        'dialogue': [   {   'speaker': 'Attendant Vera',
+                            'text': 'I knew Botanist Iris. They were frightened in the days before '
+                                    'the murder. I keep thinking I should have said something.'},
+                        {   'speaker': 'Detective',
+                            'text': 'Start from the last moment you saw them alive. Leave nothing '
+                                    'out, even what seems unimportant.'},
+                        {   'speaker': 'Attendant Vera',
+                            'text': 'She told me her sponsor smiled too easily. People who own '
+                                    'glass houses should not carry stones in their pockets.'},
+                        {   'speaker': 'Detective',
+                            'text': 'And who else knew you would be here tonight?'},
+                        {   'speaker': 'Attendant Vera',
+                            'text': 'There was a message with a silver moth on the seal. I thought '
+                                    'it was a family emblem.'},
+                        {   'speaker': 'Detective',
+                            'text': 'This is the tenth time someone has told me that. Not one of '
+                                    'them looked relieved.'},
+                        {   'speaker': 'Groundskeeper Ned',
+                            'text': 'The people who run this place have been told to pretend they '
+                                    'remember nothing.'},
+                        {   'speaker': 'Groundskeeper Ned',
+                            'text': 'Even if I told you what I saw, I doubt you would believe who '
+                                    'told me to stay silent.'},
+                        {   'speaker': 'Detective',
+                            'text': "I will decide what the evidence can support. I won't decide "
+                                    "before I've seen it."},
+                        {   'speaker': 'Attendant Vera',
+                            'text': "Then search the room. You may find the truth, but it won't "
+                                    'make this night easier.'}],
+        'suspect_speech': [   'You should have stayed away from Glass Conservatory. People who dig '
+                              'beneath a family usually find graves.',
+                              "I won't pretend I cared about Botanist Iris. But you don't know who "
+                              'truly wanted this done.',
+                              "The silver moth is not a symbol of loyalty. It's a reminder that "
+                              'someone can always see the light you stand in.',
+                              'Ask Evelyn why your case file already existed before the murder was '
+                              'reported.'],
+        'deduction_decoys': [   [   'The damage was an ordinary accident at Glass Conservatory.',
+                                    'A stranger without access arrived after everyone left.'],
+                                [   'The witness mistook a harmless visitor for the suspect.',
+                                    'There is no reliable way to link the trace to any person.'],
+                                [   'The motive was a spontaneous argument unrelated to the '
+                                    'evidence.',
+                                    'The paperwork is genuine and the loss has no connection to the '
+                                    'death.']],
+        'journal_lore': [   'CASE 06 — THE GLASS CONSERVATORY',
+                            'Location of inquiry: Glass Conservatory',
+                            'Deceased: Botanist Iris',
+                            'Current testimony suggests the public story about the death is '
+                            'incomplete.',
+                            'A silver moth token appears in the evidence chain yet again.',
+                            'The Blackwell family seems linked to the scene through a person, a '
+                            'document, or a piece of land.',
+                            "The night guard's patrol changes whenever anyone raises an alarm.",
+                            'The witness seems afraid of a threat beyond the murderer in this room.',
+                            'A false conclusion here could conceal evidence needed to unlock the '
+                            'next case.',
+                            'Only properly supported deductions can form the final accusation.'],
+        'suspect_alias': 'Silas Wren'},
+    {   'title': 'The Drowned Docks',
+        'place': 'Drowned Docks',
+        'victim': 'Courier Nash',
+        'culprit': 'Harbor Master Pike',
+        'role': 'the harbor master',
+        'motive': 'to smuggle Lantern correspondence through an unlisted quay',
+        'scene': 'docks',
+        'threat': 'Fog horns, dark water, and stacked crates leave countless blind corners for an '
+                  'ambush.',
+        'intro': [   "Nash's satchel washed ashore without the letter it was meant to protect.",
+                     'The harbor records show no unusual traffic, which usually means every unusual '
+                     'thing was paid for in cash.',
+                     'Inside the satchel lining you discover a damp moth token and an address at '
+                     'the old observatory.'],
+        'reveal': 'Pike tries to flee by launch and admits he only moved the messages; he never '
+                  'learned why the observatory mattered.',
+        'aftermath': 'The recovered correspondence mentions a rooftop meeting under a telescope and '
+                     'orders from Professor Crane.',
+        'witness': 'The current never would have carried the satchel from the public pier. Whoever '
+                   'tossed it did so from somewhere private.',
+        'clues': [   (   'Contrary Tide Chart',
+                         'The tide direction proves the satchel came from the private quay, not the '
+                         'public pier.'),
+                     (   'Braided Mooring Rope',
+                         "A rare rope braid matches the harbor master's launch."),
+                     (   'Forged Cargo Docket',
+                         "An unlisted vessel arrived under a false name in Pike's own ledger.")],
+        'questions': [   (   'Where was the satchel actually dumped?',
+                             'Contrary Tide Chart',
+                             "The current points back to Pike's private quay."),
+                         (   'Which launch was used?',
+                             'Braided Mooring Rope',
+                             "The distinctive braid identifies Pike's launch."),
+                         (   "Who hid the vessel's arrival?",
+                             'Forged Cargo Docket',
+                             'Pike altered the harbor register himself.')],
+        'cinematic': [   'The docks swallow sound. Even your footsteps seem late returning from the '
+                         'fog.',
+                         "Nash's satchel is found where the tide could not have carried it.",
+                         'The harbor watch checks the same crate three times and never looks '
+                         'inside.',
+                         'Somebody has cut the lamps along the private quay.',
+                         "Pike's boat leaves no wake on the ledger, but its rope is wet.",
+                         'A cargo docket names a ship that was officially destroyed fourteen years '
+                         'ago.',
+                         'A lantern blinks from the far jetty: one long, two short, one long.',
+                         'In the fog, a hooded figure walks straight into a line of stacked crates '
+                         'and disappears.',
+                         'A note in the satchel reads: LOOK UP WHEN THE CITY LOOKS DOWN.',
+                         "Pike's ledger has a faint outline of a moth pressed through the page.",
+                         'The tide turns before dawn. You have only a narrow window to reach the '
+                         'observatory.',
+                         'From the pier the courthouse tower looks exactly like a lighthouse with '
+                         'its light put out.'],
+        'supporting': ['Sailor Bram', 'Dockhand Moss'],
+        'room_name': 'Moonlit Quay',
+        'discovery_moments': [   'A small detail catches the light differently the second time you look.',
+                                 'You turn the item over slowly. Its meaning changes when you '
+                                 'remember what the witness said.',
+                                 'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
+        'dialogue': [   {   'speaker': 'Sailor Bram',
+                            'text': 'I knew Courier Nash. They were frightened in the days before '
+                                    'the murder. I keep thinking I should have said something.'},
+                        {   'speaker': 'Detective',
+                            'text': 'Start from the last moment you saw them alive. Leave nothing '
+                                    'out, even what seems unimportant.'},
+                        {   'speaker': 'Sailor Bram',
+                            'text': 'The current never would have carried the satchel from the '
+                                    'public pier. Whoever tossed it did so from somewhere private.'},
+                        {   'speaker': 'Detective',
+                            'text': 'And who else knew you would be here tonight?'},
+                        {   'speaker': 'Sailor Bram',
+                            'text': 'There was a message with a silver moth on the seal. I thought '
+                                    'it was a family emblem.'},
+                        {   'speaker': 'Detective',
+                            'text': 'This is the tenth time someone has told me that. Not one of '
+                                    'them looked relieved.'},
+                        {   'speaker': 'Dockhand Moss',
+                            'text': 'The people who run this place have been told to pretend they '
+                                    'remember nothing.'},
+                        {   'speaker': 'Dockhand Moss',
+                            'text': 'Even if I told you what I saw, I doubt you would believe who '
+                                    'told me to stay silent.'},
+                        {   'speaker': 'Detective',
+                            'text': "I will decide what the evidence can support. I won't decide "
+                                    "before I've seen it."},
+                        {   'speaker': 'Sailor Bram',
+                            'text': "Then search the room. You may find the truth, but it won't "
+                                    'make this night easier.'}],
+        'suspect_speech': [   'You should have stayed away from Drowned Docks. People who dig '
+                              'beneath a family usually find graves.',
+                              "I won't pretend I cared about Courier Nash. But you don't know who "
+                              'truly wanted this done.',
+                              "The silver moth is not a symbol of loyalty. It's a reminder that "
+                              'someone can always see the light you stand in.',
+                              'Ask Evelyn why your case file already existed before the murder was '
+                              'reported.'],
+        'deduction_decoys': [   [   'The damage was an ordinary accident at Drowned Docks.',
+                                    'A stranger without access arrived after everyone left.'],
+                                [   'The witness mistook a harmless visitor for the suspect.',
+                                    'There is no reliable way to link the trace to any person.'],
+                                [   'The motive was a spontaneous argument unrelated to the '
+                                    'evidence.',
+                                    'The paperwork is genuine and the loss has no connection to the '
+                                    'death.']],
+        'journal_lore': [   'CASE 07 — THE DROWNED DOCKS',
+                            'Location of inquiry: Drowned Docks',
+                            'Deceased: Courier Nash',
+                            'Current testimony suggests the public story about the death is '
+                            'incomplete.',
+                            'A silver moth token appears in the evidence chain yet again.',
+                            'The Blackwell family seems linked to the scene through a person, a '
+                            'document, or a piece of land.',
+                            "The night guard's patrol changes whenever anyone raises an alarm.",
+                            'The witness seems afraid of a threat beyond the murderer in this room.',
+                            'A false conclusion here could conceal evidence needed to unlock the '
+                            'next case.',
+                            'Only properly supported deductions can form the final accusation.'],
+        'suspect_alias': 'Harbor Master Pike'},
+    {   'title': 'The Silent Observatory',
+        'place': 'Silent Observatory',
+        'victim': 'Astronomer Grey',
+        'culprit': 'Professor Crane',
+        'role': 'the observatory director',
+        'motive': 'to protect secret Lantern meetings hidden in plain sight',
+        'scene': 'observatory',
+        'threat': 'The dome turns like a gun turret over the city, and every metal footstep echoes '
+                  'into the dark.',
+        'intro': [   "Grey's final sky chart mapped no constellation at all.",
+                     'Instead, his telescope was locked toward the courthouse tower and his last '
+                     'journal entry listed guest initials, not stars.',
+                     'At the base of the instrument lies yet another silver moth, scratched with a '
+                     'courthouse seal.'],
+        'reveal': 'Crane confesses the observatory dome was used to shield meetings, but insists '
+                  'the real founder still moves inside the Blackwell family itself.',
+        'aftermath': 'Impressions in a guest book name a magistrate and reference sealed evidence '
+                     'in the old courthouse archive.',
+        'witness': 'Grey said he had found a star that could ruin men in broad daylight. Then he '
+                   'laughed and pointed at the courthouse.',
+        'clues': [   (   'Misaligned Star Chart',
+                         'The telescope angle matches the courthouse tower rather than a '
+                         'constellation.'),
+                     (   'Broken Dome Gear',
+                         'A damaged gear jammed the dome mechanism and blocked an exit.'),
+                     (   'Indented Guest Book',
+                         'Erased names still show through as impressions on the page.')],
+        'questions': [   (   'What was Grey truly observing?',
+                             'Misaligned Star Chart',
+                             'He was watching the courthouse tower, not the night sky.'),
+                         (   'How was escape prevented?',
+                             'Broken Dome Gear',
+                             'Someone jammed the dome with deliberate force.'),
+                         (   'Who attended the secret meeting?',
+                             'Indented Guest Book',
+                             'The erased impressions identify Lantern trustees and Magistrate '
+                             'Blythe.')],
+        'cinematic': [   'The telescope is pointed at the courthouse, but the dome is aligned with '
+                         'the moon.',
+                         "Grey's journal records people gathering at the tower as if they were "
+                         'celestial events.',
+                         'The observatory director has removed one gear and left its teeth lying on '
+                         'the floor.',
+                         'A cold circle on the desk shows where a flask once stood.',
+                         'Someone has marked the guest book with invisible pressure, not ink.',
+                         'The metal dome rotates. The exit moves behind you as the mechanism '
+                         'grinds.',
+                         "An old recording plays a man's voice reading out a trial verdict.",
+                         'Crane asks how many lives are worth preserving a single name.',
+                         "A brass moth is mounted inside the telescope's eyepiece cap.",
+                         'Your evidence points downward even as the telescope points toward the '
+                         'sky.',
+                         'The courthouse windows wink once in answer to a signal nobody sent.',
+                         'A second observer watches from the stairs. By the time you reach them, '
+                         'they are gone.'],
+        'supporting': ['Assistant Hester', 'Night Watcher'],
+        'room_name': 'Lower Dome',
+        'discovery_moments': [   'A small detail catches the light differently the second time you look.',
+                                 'You turn the item over slowly. Its meaning changes when you '
+                                 'remember what the witness said.',
+                                 'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
+        'dialogue': [   {   'speaker': 'Assistant Hester',
+                            'text': 'I knew Astronomer Grey. They were frightened in the days '
+                                    'before the murder. I keep thinking I should have said '
+                                    'something.'},
+                        {   'speaker': 'Detective',
+                            'text': 'Start from the last moment you saw them alive. Leave nothing '
+                                    'out, even what seems unimportant.'},
+                        {   'speaker': 'Assistant Hester',
+                            'text': 'Grey said he had found a star that could ruin men in broad '
+                                    'daylight. Then he laughed and pointed at the courthouse.'},
+                        {   'speaker': 'Detective',
+                            'text': 'And who else knew you would be here tonight?'},
+                        {   'speaker': 'Assistant Hester',
+                            'text': 'There was a message with a silver moth on the seal. I thought '
+                                    'it was a family emblem.'},
+                        {   'speaker': 'Detective',
+                            'text': 'This is the tenth time someone has told me that. Not one of '
+                                    'them looked relieved.'},
+                        {   'speaker': 'Night Watcher',
+                            'text': 'The people who run this place have been told to pretend they '
+                                    'remember nothing.'},
+                        {   'speaker': 'Night Watcher',
+                            'text': 'Even if I told you what I saw, I doubt you would believe who '
+                                    'told me to stay silent.'},
+                        {   'speaker': 'Detective',
+                            'text': "I will decide what the evidence can support. I won't decide "
+                                    "before I've seen it."},
+                        {   'speaker': 'Assistant Hester',
+                            'text': "Then search the room. You may find the truth, but it won't "
+                                    'make this night easier.'}],
+        'suspect_speech': [   'You should have stayed away from Silent Observatory. People who dig '
+                              'beneath a family usually find graves.',
+                              "I won't pretend I cared about Astronomer Grey. But you don't know "
+                              'who truly wanted this done.',
+                              "The silver moth is not a symbol of loyalty. It's a reminder that "
+                              'someone can always see the light you stand in.',
+                              'Ask Evelyn why your case file already existed before the murder was '
+                              'reported.'],
+        'deduction_decoys': [   [   'The damage was an ordinary accident at Silent Observatory.',
+                                    'A stranger without access arrived after everyone left.'],
+                                [   'The witness mistook a harmless visitor for the suspect.',
+                                    'There is no reliable way to link the trace to any person.'],
+                                [   'The motive was a spontaneous argument unrelated to the '
+                                    'evidence.',
+                                    'The paperwork is genuine and the loss has no connection to the '
+                                    'death.']],
+        'journal_lore': [   'CASE 08 — THE SILENT OBSERVATORY',
+                            'Location of inquiry: Silent Observatory',
+                            'Deceased: Astronomer Grey',
+                            'Current testimony suggests the public story about the death is '
+                            'incomplete.',
+                            'A silver moth token appears in the evidence chain yet again.',
+                            'The Blackwell family seems linked to the scene through a person, a '
+                            'document, or a piece of land.',
+                            "The night guard's patrol changes whenever anyone raises an alarm.",
+                            'The witness seems afraid of a threat beyond the murderer in this room.',
+                            'A false conclusion here could conceal evidence needed to unlock the '
+                            'next case.',
+                            'Only properly supported deductions can form the final accusation.'],
+        'suspect_alias': 'Professor Crane'},
+    {   'title': 'The Court of Ash',
+        'place': 'Old Courthouse',
+        'victim': 'Judge Harrow',
+        'culprit': 'Magistrate Blythe',
+        'role': 'a magistrate',
+        'motive': 'to bury the founding trial that protected the Lantern',
+        'scene': 'court',
+        'threat': 'The courthouse is all echoes and locked doors; once suspicion rises, every '
+                  'bailiff becomes a hunter.',
+        'intro': [   'Harrow reopened a case older than you are and died the night before the '
+                     'hearing.',
+                     'The archive vault is sealed from the inside, but soot marks show the fire '
+                     'began in a document tray, not the furnace.',
+                     "Tucked inside a law volume is the ninth moth token and the words: 'She was "
+                     "acquitted to found them all.'"],
+        'reveal': 'Blythe confesses to the murder and to replacing trial pages—yet she fears Lady '
+                  'Evelyn more than prison or death.',
+        'aftermath': 'The restored transcript names Evelyn Blackwell as the hidden architect. The '
+                     'moth tokens align into a map of the family crypt.',
+        'witness': 'The trial had two verdicts. Someone wanted history to remember the innocent one '
+                   'and bury the other in ash.',
+        'clues': [   (   'Replacement Transcript',
+                         'Several trial pages were substituted to hide a second verdict.'),
+                     (   'Authorization Stamp',
+                         "The replacement pages bear Blythe's archive authorization stamp."),
+                     (   'Dustless Passage',
+                         'A hidden corridor to the archives shows fresh footprints in otherwise '
+                         'settled dust.')],
+        'questions': [   (   'What did the original verdict reveal?',
+                             'Replacement Transcript',
+                             'The founder was cleared through fraud, not innocence.'),
+                         (   'Who inserted the false pages?',
+                             'Authorization Stamp',
+                             'Blythe authorized and installed the substitutions.'),
+                         (   'How was the sealed archive reached?',
+                             'Dustless Passage',
+                             'The killer used an unrecorded private corridor.')],
+        'cinematic': [   "Judge Harrow's office is immaculate. His trial notes are not.",
+                         'Every replaced transcript page contains the same faint printer error.',
+                         'A magistrate claims she has not entered the archive in years. Dust on her '
+                         'coat is from the archive ceiling.',
+                         'The courthouse clock rings one fewer time than it should.',
+                         "Harrow's last case file has your own initials penciled at the margin.",
+                         "A juror's statement ends mid-sentence and begins again in someone else's "
+                         'handwriting.',
+                         'Behind the bench, a narrow passage leads toward a sealed file room.',
+                         'Blythe has kept two verdicts under one case number.',
+                         'An old newspaper photograph shows Evelyn without looking one day younger '
+                         'than she does now.',
+                         "A moth-shaped keyhole appears on the underside of the judge's desk.",
+                         'You read the original verdict. The accused was the person who first hired '
+                         'you.',
+                         'The last token clicks into place. The floor plan leads back to the '
+                         'manor.'],
+        'supporting': ['Clerk Sloane', 'Bailiff Flint'],
+        'room_name': 'Sealed Records',
+        'discovery_moments': [   'A small detail catches the light differently the second time you look.',
+                                 'You turn the item over slowly. Its meaning changes when you '
+                                 'remember what the witness said.',
+                                 'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
+        'dialogue': [   {   'speaker': 'Clerk Sloane',
+                            'text': 'I knew Judge Harrow. They were frightened in the days before '
+                                    'the murder. I keep thinking I should have said something.'},
+                        {   'speaker': 'Detective',
+                            'text': 'Start from the last moment you saw them alive. Leave nothing '
+                                    'out, even what seems unimportant.'},
+                        {   'speaker': 'Clerk Sloane',
+                            'text': 'The trial had two verdicts. Someone wanted history to remember '
+                                    'the innocent one and bury the other in ash.'},
+                        {   'speaker': 'Detective',
+                            'text': 'And who else knew you would be here tonight?'},
+                        {   'speaker': 'Clerk Sloane',
+                            'text': 'There was a message with a silver moth on the seal. I thought '
+                                    'it was a family emblem.'},
+                        {   'speaker': 'Detective',
+                            'text': 'This is the tenth time someone has told me that. Not one of '
+                                    'them looked relieved.'},
+                        {   'speaker': 'Bailiff Flint',
+                            'text': 'The people who run this place have been told to pretend they '
+                                    'remember nothing.'},
+                        {   'speaker': 'Bailiff Flint',
+                            'text': 'Even if I told you what I saw, I doubt you would believe who '
+                                    'told me to stay silent.'},
+                        {   'speaker': 'Detective',
+                            'text': "I will decide what the evidence can support. I won't decide "
+                                    "before I've seen it."},
+                        {   'speaker': 'Clerk Sloane',
+                            'text': "Then search the room. You may find the truth, but it won't "
+                                    'make this night easier.'}],
+        'suspect_speech': [   'You should have stayed away from Old Courthouse. People who dig '
+                              'beneath a family usually find graves.',
+                              "I won't pretend I cared about Judge Harrow. But you don't know who "
+                              'truly wanted this done.',
+                              "The silver moth is not a symbol of loyalty. It's a reminder that "
+                              'someone can always see the light you stand in.',
+                              'Ask Evelyn why your case file already existed before the murder was '
+                              'reported.'],
+        'deduction_decoys': [   [   'The damage was an ordinary accident at Old Courthouse.',
+                                    'A stranger without access arrived after everyone left.'],
+                                [   'The witness mistook a harmless visitor for the suspect.',
+                                    'There is no reliable way to link the trace to any person.'],
+                                [   'The motive was a spontaneous argument unrelated to the '
+                                    'evidence.',
+                                    'The paperwork is genuine and the loss has no connection to the '
+                                    'death.']],
+        'journal_lore': [   'CASE 09 — THE COURT OF ASH',
+                            'Location of inquiry: Old Courthouse',
+                            'Deceased: Judge Harrow',
+                            'Current testimony suggests the public story about the death is '
+                            'incomplete.',
+                            'A silver moth token appears in the evidence chain yet again.',
+                            'The Blackwell family seems linked to the scene through a person, a '
+                            'document, or a piece of land.',
+                            "The night guard's patrol changes whenever anyone raises an alarm.",
+                            'The witness seems afraid of a threat beyond the murderer in this room.',
+                            'A false conclusion here could conceal evidence needed to unlock the '
+                            'next case.',
+                            'Only properly supported deductions can form the final accusation.'],
+        'suspect_alias': 'Magistrate Blythe'},
+    {   'title': 'The Last Lantern',
+        'place': 'Blackwell Crypt',
+        'victim': 'The final witness',
+        'culprit': 'Evelyn Blackwell',
+        'role': 'the hidden architect of the Lantern',
+        'motive': 'to preserve the family myth by controlling every witness and every record',
+        'scene': 'crypt',
+        'threat': 'The crypt is a maze of candles, stone, and family portraits; even victory feels '
+                  'like trespass.',
+        'intro': [   'The nine silver moths fit together into a floor plan beneath the Blackwell '
+                     'estate.',
+                     'Lady Evelyn has been at your shoulder since the first death—offering help, '
+                     'steering your attention, feeding your anger.',
+                     'Now the crypt opens, and your final witness lies dying beside a recorder '
+                     'addressed to you alone.'],
+        'reveal': 'Evelyn admits every chapter served her design: each murder pruned a threat to '
+                  'the Blackwell legend and drew you downward, one truth at a time.',
+        'aftermath': 'With Evelyn dead, the Lantern collapses. The records survive. So does the '
+                     'uneasy knowledge that she turned your own hunger for justice into her final '
+                     'weapon.',
+        'witness': 'She said the family had to remain a story, not a bloodline. Stories survive '
+                   'because somebody chooses what is remembered.',
+        'clues': [   ('Moth Map', "The nine moth tokens lock together into the crypt's floor plan."),
+                     (   "Founder's Portrait",
+                         'A concealed dedication names Evelyn as the surviving heir to the '
+                         'founder.'),
+                     (   'Final Confession',
+                         'A sealed recording links Evelyn to every prior killing and every order.')],
+        'questions': [   (   'What links all nine previous cases?',
+                             'Moth Map',
+                             'Each crime followed instructions embedded in the moth token network.'),
+                         (   'Who truly founded and preserved the Lantern?',
+                             "Founder's Portrait",
+                             'Evelyn Blackwell inherited and directed the society.'),
+                         (   'Who ordered the chain of murders?',
+                             'Final Confession',
+                             'The recording names Evelyn as the architect behind all ten '
+                             'chapters.')],
+        'cinematic': [   'The manor is quiet when you return. The storm ended days ago. The windows '
+                         'are still lit.',
+                         'Nine brass moths fit together like wings around a hollow center.',
+                         'The crypt opens beneath the family portrait that was moved on the first '
+                         'night.',
+                         'A recording addressed to you plays in the voice of someone you buried '
+                         'three chapters ago.',
+                         'Evelyn is waiting under a circle of candles. She has dressed for a '
+                         'funeral but wears no mourning black.',
+                         'The surviving witness tries to speak. Evelyn closes their eyes before '
+                         'they can say her name.',
+                         "Every murder removed someone who might have contradicted the family's "
+                         'official history.',
+                         'The ledger reveals Evelyn funded the investigation as carefully as she '
+                         'funded the killings.',
+                         'She says she needed a detective brave enough to do what the Lantern could '
+                         'no longer do.',
+                         'Your journal lies open on the altar, its pages rearranged into the '
+                         'chronology she wanted you to discover.',
+                         'The final confession is real. So are the lives that will never be '
+                         'returned.',
+                         'You have one decision left: end the person who shaped the mystery, or '
+                         'become part of her ending.'],
+        'supporting': ['Evelyn', 'The last witness'],
+        'room_name': 'Family Crypt',
+        'discovery_moments': [   'A small detail catches the light differently the second time you look.',
+                                 'You turn the item over slowly. Its meaning changes when you '
+                                 'remember what the witness said.',
+                                 'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
+        'dialogue': [   {   'speaker': 'Evelyn',
+                            'text': 'I knew The final witness. They were frightened in the days '
+                                    'before the murder. I keep thinking I should have said '
+                                    'something.'},
+                        {   'speaker': 'Detective',
+                            'text': 'Start from the last moment you saw them alive. Leave nothing '
+                                    'out, even what seems unimportant.'},
+                        {   'speaker': 'Evelyn',
+                            'text': 'She said the family had to remain a story, not a bloodline. '
+                                    'Stories survive because somebody chooses what is remembered.'},
+                        {   'speaker': 'Detective',
+                            'text': 'And who else knew you would be here tonight?'},
+                        {   'speaker': 'Evelyn',
+                            'text': 'There was a message with a silver moth on the seal. I thought '
+                                    'it was a family emblem.'},
+                        {   'speaker': 'Detective',
+                            'text': 'This is the tenth time someone has told me that. Not one of '
+                                    'them looked relieved.'},
+                        {   'speaker': 'The last witness',
+                            'text': 'The people who run this place have been told to pretend they '
+                                    'remember nothing.'},
+                        {   'speaker': 'The last witness',
+                            'text': 'Even if I told you what I saw, I doubt you would believe who '
+                                    'told me to stay silent.'},
+                        {   'speaker': 'Detective',
+                            'text': "I will decide what the evidence can support. I won't decide "
+                                    "before I've seen it."},
+                        {   'speaker': 'Evelyn',
+                            'text': "Then search the room. You may find the truth, but it won't "
+                                    'make this night easier.'}],
+        'suspect_speech': [   'You should have stayed away from Blackwell Crypt. People who dig '
+                              'beneath a family usually find graves.',
+                              "I won't pretend I cared about The final witness. But you don't know "
+                              'who truly wanted this done.',
+                              "The silver moth is not a symbol of loyalty. It's a reminder that "
+                              'someone can always see the light you stand in.',
+                              'Ask Evelyn why your case file already existed before the murder was '
+                              'reported.'],
+        'deduction_decoys': [   [   'The damage was an ordinary accident at Blackwell Crypt.',
+                                    'A stranger without access arrived after everyone left.'],
+                                [   'The witness mistook a harmless visitor for the suspect.',
+                                    'There is no reliable way to link the trace to any person.'],
+                                [   'The motive was a spontaneous argument unrelated to the '
+                                    'evidence.',
+                                    'The paperwork is genuine and the loss has no connection to the '
+                                    'death.']],
+        'journal_lore': [   'CASE 10 — THE LAST LANTERN',
+                            'Location of inquiry: Blackwell Crypt',
+                            'Deceased: The final witness',
+                            'Current testimony suggests the public story about the death is '
+                            'incomplete.',
+                            'A silver moth token appears in the evidence chain yet again.',
+                            'The Blackwell family seems linked to the scene through a person, a '
+                            'document, or a piece of land.',
+                            "The night guard's patrol changes whenever anyone raises an alarm.",
+                            'The witness seems afraid of a threat beyond the murderer in this room.',
+                            'A false conclusion here could conceal evidence needed to unlock the '
+                            'next case.',
+                            'Only properly supported deductions can form the final accusation.'],
+        'suspect_alias': 'Evelyn Blackwell'}]
+
+# Each discovery has a specific sensory detail rather than procedural narration.
+# These lines are written from the detective's viewpoint, not as tutorial text.
+DISCOVERY_BEATS = [
+    [
+        "The clock is warm to the touch. The hands are dead, but the mechanism within still struggles to turn.",
+        "Rain has filled the heel impressions. One print stops sharply, as though its owner heard the study door open.",
+        "Only the signature survives the flame. Someone wanted Albert frightened by the debt before he died.",
+    ],
+    [
+        "The punch is an older pattern, a little star where there should be a square. Who kept a machine everyone else had discarded?",
+        "The porter remembers the coat because its hem dragged in the rain. His memory is clear; his timing may not be.",
+        "Fresh ink gleams across a dry column. Ada has written herself into a night she cannot account for.",
+    ],
+    [
+        "Wax has settled in the lock's teeth, preserving the shape of a key no guest should possess.",
+        "The figures add up too neatly. The hotel charged for a treatment that Rowan never received.",
+        "The bell rope shivers under your fingers. Someone used it after the room had already fallen silent.",
+    ],
+    [
+        "The cue has been added in a tighter hand than the rest. Someone prepared a second darkness.",
+        "A crimson fiber catches on the latch. It came from a sleeve, not from the stage curtain.",
+        "The canister rattles without a reel inside. The real treasure is the list taped beneath its base.",
+    ],
+    [
+        "The missing pages were cut away before the fire caught. The flames were meant to disguise a careful removal.",
+        "Voss's crest is pressed into the wax twice. The second impression was made while the seal was still warm.",
+        "The route avoids the lamps and passes the registrar's private steps. The witness knew that path well.",
+    ],
+    [
+        "Glass lies inside the conservatory in a fan shape. Nothing about its fall resembles an accident from within.",
+        "A blank inventory line holds the impression of a number that has been rubbed out.",
+        "Iris's handwriting deteriorates at the bottom of the page. The name she feared is still legible.",
+    ],
+    [
+        "The tide mark contradicts the harbor record. The water could not have done what Pike claims.",
+        "Salt has dried into the rope's braid, but the knot is freshly tied.",
+        "A false vessel name sits over another entry. Held to the light, the original still shows through.",
+    ],
+    [
+        "Grey used a star chart to point at a courtroom. He must have wanted the discovery to look harmless.",
+        "One gear tooth has been bent backward by a tool. The dome did not fail by itself.",
+        "The names are gone, but their impressions remain on the next page like whispers pressed into paper.",
+    ],
+    [
+        "The transcript changes voice halfway down the page. Two verdicts were made to read as one.",
+        "The approval mark sits over a fold; the page was stamped after it was inserted.",
+        "Dust has been brushed away in the shape of a narrow foot. Someone passed through the forgotten corridor.",
+    ],
+    [
+        "The nine moths meet along their damaged edges. Together they form a path through the crypt.",
+        "Someone painted over the dedication, but the older lettering rises through the varnish.",
+        "The recording begins with Evelyn's voice. She sounds less like a confessor than someone finishing a lesson.",
+    ],
+]
+for _chapter, _moments in zip(CHAPTERS, DISCOVERY_BEATS):
+    _chapter["discovery_moments"] = _moments
+
+# -----------------------------------------------------------------------------
+# LEVEL BIBLE
+# The rooms share a navigation grammar (approachable desks, exits, soft cover),
+# but have distinct materials, furniture, clues, props, and spatial rhythm.
+# Coordinates are in world pixels, not display pixels.
+# -----------------------------------------------------------------------------
+
+THEMES = [
+    {
+        "name": "manor",
+        "floor": (52, 35, 38),
+        "floor2": (66, 42, 43),
+        "floor_line": (87, 59, 58),
+        "wall": (49, 38, 51),
+        "wall2": (69, 49, 55),
+        "trim": (130, 91, 67),
+        "rug": (94, 41, 55),
+        "rug_border": (185, 121, 71),
+        "blue": (25, 47, 67),
+        "warm": (238, 183, 103),
+    },
+    {
+        "name": "train",
+        "floor": (52, 48, 50),
+        "floor2": (64, 55, 51),
+        "floor_line": (84, 76, 70),
+        "wall": (38, 51, 66),
+        "wall2": (45, 59, 75),
+        "trim": (155, 123, 84),
+        "rug": (52, 62, 76),
+        "rug_border": (168, 143, 93),
+        "blue": (20, 42, 63),
+        "warm": (240, 192, 108),
+    },
+    {
+        "name": "hotel",
+        "floor": (59, 51, 59),
+        "floor2": (66, 56, 62),
+        "floor_line": (94, 80, 80),
+        "wall": (48, 35, 44),
+        "wall2": (62, 44, 48),
+        "trim": (142, 110, 81),
+        "rug": (67, 51, 76),
+        "rug_border": (183, 133, 78),
+        "blue": (28, 42, 55),
+        "warm": (228, 173, 104),
+    },
+    {
+        "name": "theater",
+        "floor": (50, 31, 43),
+        "floor2": (62, 37, 50),
+        "floor_line": (98, 52, 63),
+        "wall": (60, 27, 45),
+        "wall2": (85, 31, 52),
+        "trim": (150, 87, 76),
+        "rug": (99, 30, 48),
+        "rug_border": (204, 144, 81),
+        "blue": (27, 36, 54),
+        "warm": (255, 181, 97),
+    },
+    {
+        "name": "archive",
+        "floor": (62, 43, 36),
+        "floor2": (72, 53, 39),
+        "floor_line": (102, 72, 58),
+        "wall": (55, 42, 39),
+        "wall2": (75, 51, 43),
+        "trim": (152, 110, 77),
+        "rug": (64, 49, 57),
+        "rug_border": (172, 127, 75),
+        "blue": (24, 40, 54),
+        "warm": (245, 170, 80),
+    },
+    {
+        "name": "greenhouse",
+        "floor": (50, 68, 59),
+        "floor2": (62, 76, 65),
+        "floor_line": (78, 101, 80),
+        "wall": (34, 60, 59),
+        "wall2": (44, 75, 72),
+        "trim": (126, 137, 110),
+        "rug": (60, 74, 62),
+        "rug_border": (164, 155, 96),
+        "blue": (23, 63, 72),
+        "warm": (222, 187, 114),
+    },
+    {
+        "name": "docks",
+        "floor": (55, 53, 48),
+        "floor2": (68, 62, 53),
+        "floor_line": (93, 83, 72),
+        "wall": (33, 45, 58),
+        "wall2": (39, 53, 65),
+        "trim": (138, 105, 77),
+        "rug": (44, 61, 69),
+        "rug_border": (155, 116, 80),
+        "blue": (18, 52, 77),
+        "warm": (231, 169, 93),
+    },
+    {
+        "name": "observatory",
+        "floor": (47, 53, 64),
+        "floor2": (58, 63, 73),
+        "floor_line": (73, 89, 103),
+        "wall": (32, 43, 57),
+        "wall2": (41, 57, 72),
+        "trim": (128, 128, 121),
+        "rug": (59, 56, 72),
+        "rug_border": (154, 137, 104),
+        "blue": (21, 46, 70),
+        "warm": (236, 188, 120),
+    },
+    {
+        "name": "court",
+        "floor": (64, 52, 47),
+        "floor2": (75, 61, 55),
+        "floor_line": (95, 82, 74),
+        "wall": (57, 48, 50),
+        "wall2": (72, 58, 59),
+        "trim": (148, 114, 85),
+        "rug": (78, 45, 53),
+        "rug_border": (192, 138, 91),
+        "blue": (33, 47, 58),
+        "warm": (243, 192, 120),
+    },
+    {
+        "name": "crypt",
+        "floor": (46, 49, 59),
+        "floor2": (54, 57, 65),
+        "floor_line": (84, 91, 99),
+        "wall": (34, 39, 51),
+        "wall2": (45, 49, 62),
+        "trim": (127, 112, 100),
+        "rug": (53, 44, 62),
+        "rug_border": (172, 152, 118),
+        "blue": (25, 43, 64),
+        "warm": (240, 181, 96),
+    },
+]
+
+# Each tuple is (visual, world x, world y, variant/size). Interactive objects are
+# deliberately NOT overlaid with permanent icons; the player discovers them by
+# studying recognizable shapes and context clues.
+ROOM_PROPS = [
+    [
+        ("rug", 122, 128, 0), ("bookcase", 34, 48, 0),
+        ("bookcase", 92, 48, 1), ("bookcase", 377, 48, 2),
+        ("bookcase", 441, 48, 3), ("fireplace", 238, 45, 0),
+        ("painting", 331, 45, 0), ("desk", 126, 119, 0),
+        ("clock", 150, 114, 0), ("letter", 317, 198, 1),
+        ("footprints", 444, 132, 0), ("armchair", 199, 205, 0),
+        ("armchair", 308, 206, 1), ("table", 244, 229, 0),
+        ("candle", 262, 225, 1), ("plant", 58, 225, 1),
+        ("plant", 479, 247, 1), ("wardrobe", 35, 270, 1),
+        ("bookcase", 403, 245, 1), ("piano", 418, 147, 0),
+    ],
+    [
+        ("runner", 90, 139, 0), ("window", 88, 47, 0),
+        ("window", 202, 47, 1), ("window", 382, 47, 0),
+        ("window", 485, 47, 1), ("bench", 57, 122, 0),
+        ("bench", 387, 130, 1), ("ticket", 144, 132, 0),
+        ("paper", 310, 217, 0), ("ledger", 443, 132, 0),
+        ("suitcase", 207, 250, 0), ("suitcase", 484, 213, 1),
+        ("clock", 274, 46, 1), ("lamp", 364, 98, 0),
+        ("crate", 55, 284, 0), ("crate", 75, 289, 1),
+        ("coatstand", 459, 270, 0), ("pillar", 267, 83, 0),
+    ],
+    [
+        ("runner", 109, 130, 0), ("door", 126, 50, 0),
+        ("door", 375, 50, 1), ("key", 138, 110, 0),
+        ("bill", 288, 204, 0), ("bell", 454, 124, 0),
+        ("desk", 269, 196, 0), ("armchair", 194, 218, 1),
+        ("armchair", 385, 242, 0), ("plant", 54, 268, 0),
+        ("plant", 474, 263, 0), ("lamp", 78, 157, 1),
+        ("lamp", 485, 153, 0), ("painting", 248, 51, 1),
+        ("wardrobe", 46, 98, 2), ("counter", 400, 271, 0),
+    ],
+    [
+        ("stage", 82, 47, 0), ("curtain", 89, 47, 0),
+        ("curtain", 399, 47, 1), ("piano", 202, 87, 0),
+        ("cue", 122, 122, 0), ("velvet", 297, 207, 0),
+        ("film", 443, 136, 0), ("table", 282, 218, 0),
+        ("footlight", 114, 168, 0), ("footlight", 197, 168, 0),
+        ("footlight", 374, 168, 0), ("footlight", 451, 168, 0),
+        ("bench", 123, 271, 0), ("bench", 380, 276, 0),
+        ("wardrobe", 53, 258, 0), ("coatstand", 495, 245, 0),
+    ],
+    [
+        ("runner", 114, 125, 0), ("bookcase", 40, 47, 0),
+        ("bookcase", 96, 47, 1), ("bookcase", 390, 47, 2),
+        ("bookcase", 450, 47, 3), ("burned", 122, 118, 0),
+        ("seal", 290, 210, 0), ("sketch", 445, 123, 0),
+        ("desk", 265, 204, 1), ("clock", 276, 50, 0),
+        ("crate", 64, 267, 2), ("crate", 103, 278, 0),
+        ("plant", 472, 251, 2), ("lamp", 395, 202, 0),
+        ("armchair", 202, 228, 0), ("bookcase", 390, 265, 0),
+    ],
+    [
+        ("glassfloor", 77, 105, 0), ("plant", 47, 122, 2),
+        ("plant", 109, 89, 1), ("plant", 439, 102, 2),
+        ("plant", 487, 212, 0), ("glass", 153, 121, 0),
+        ("inventory", 304, 201, 0), ("note", 452, 137, 0),
+        ("desk", 289, 193, 1), ("bench", 208, 251, 0),
+        ("plant", 70, 281, 2), ("plant", 158, 286, 0),
+        ("plant", 361, 293, 1), ("plant", 452, 278, 2),
+        ("glass", 78, 73, 1), ("glass", 475, 76, 2),
+    ],
+    [
+        ("dockfloor", 60, 118, 0), ("water", 67, 49, 0),
+        ("water", 401, 47, 1), ("tide", 140, 124, 0),
+        ("rope", 303, 212, 0), ("cargo", 448, 136, 0),
+        ("crate", 112, 202, 0), ("crate", 232, 248, 2),
+        ("crate", 379, 233, 1), ("crate", 438, 269, 0),
+        ("barrel", 85, 290, 0), ("barrel", 475, 234, 0),
+        ("lantern", 257, 92, 0), ("lantern", 380, 93, 1),
+        ("suitcase", 209, 159, 0), ("bench", 381, 270, 0),
+    ],
+    [
+        ("starchart", 101, 116, 0), ("telescope", 242, 70, 0),
+        ("guestbook", 446, 136, 0), ("gear", 303, 215, 0),
+        ("desk", 285, 207, 2), ("clock", 271, 43, 2),
+        ("scope", 155, 88, 0), ("window", 61, 49, 2),
+        ("window", 459, 49, 3), ("bookshelf", 83, 255, 0),
+        ("plant", 480, 262, 1), ("globe", 411, 261, 0),
+        ("bench", 191, 267, 1), ("lamp", 391, 183, 1),
+    ],
+    [
+        ("runner", 118, 115, 0), ("bench", 98, 185, 0),
+        ("bench", 445, 205, 1), ("judgebench", 196, 55, 0),
+        ("transcript", 139, 130, 0), ("stamp", 300, 206, 0),
+        ("passage", 459, 128, 0), ("desk", 282, 198, 0),
+        ("bookshelf", 55, 251, 2), ("bookshelf", 449, 264, 1),
+        ("portrait", 97, 51, 0), ("portrait", 398, 51, 1),
+        ("candle", 225, 140, 1), ("candle", 370, 146, 0),
+    ],
+    [
+        ("stonefloor", 105, 108, 0), ("coffin", 224, 114, 0),
+        ("moths", 146, 130, 0), ("portrait", 302, 200, 2),
+        ("record", 453, 134, 0), ("altar", 276, 196, 0),
+        ("candle", 88, 143, 1), ("candle", 488, 136, 0),
+        ("candle", 111, 241, 1), ("candle", 444, 250, 1),
+        ("pillar", 67, 76, 0), ("pillar", 470, 78, 0),
+        ("pillar", 79, 291, 0), ("pillar", 461, 300, 0),
+        ("statue", 55, 205, 0), ("statue", 472, 211, 1),
+    ],
+]
+
+EVIDENCE_SHAPES = [
+    ("clock", "footprints", "letter"),
+    ("ticket", "paper", "ledger"),
+    ("key", "bill", "bell"),
+    ("cue", "velvet", "film"),
+    ("burned", "seal", "sketch"),
+    ("glass", "inventory", "note"),
+    ("tide", "rope", "cargo"),
+    ("starchart", "gear", "guestbook"),
+    ("transcript", "stamp", "passage"),
+    ("moths", "portrait", "record"),
+]
+
+EVIDENCE_COORDS = [
+    ((155, 126), (444, 132), (318, 203)),
+    ((149, 143), (309, 222), (445, 141)),
+    ((141, 115), (292, 212), (457, 134)),
+    ((129, 125), (301, 217), (446, 143)),
+    ((128, 129), (298, 215), (446, 130)),
+    ((160, 132), (308, 215), (453, 143)),
+    ((146, 134), (310, 219), (450, 141)),
+    ((149, 123), (307, 226), (448, 143)),
+    ((145, 134), (307, 215), (461, 133)),
+    ((149, 132), (308, 211), (457, 140)),
+]
 
 
-TUTORIAL_STEPS = (
-    ('Meet your engineer', 'Move with WASD. Walk a few steps around the core. You carry tools, not a weapon.'),
-    ('Gather metal', 'Hold E by the Metal deposit. Release E to cool. Press Space in the green for a bonus. Collect 16 Metal.'),
-    ('Choose a robot', 'Click Rifle Robot in the sidebar. The panel explains what it does and what it costs.'),
-    ('Set a construction site', 'Face an empty tile near the core, then press F. The preview must be green and within reach.'),
-    ('Build it yourself', 'Walk beside the construction frame and hold E until the robot is finished. Work pauses when you leave.'),
-    ('Meet your robot', 'Walk up to your completed robot and press E. Upgrades are available only while you are beside it.'),
-    ('Install an upgrade', 'Choose an affordable upgrade, then hold E beside the robot to install it. It takes time.'),
-    ('Get ready for wave 1', 'The first wave starts automatically after the prep timer. Visit the core to check it or upgrade your drill.'),
-    ('Protect the core', 'Let your robot fight. Bugs damage defenses and the core. Touching a bug knocks you back. Survive wave 1.'),
-)
+# Every cover identity has a social role and a story consequence. A convincing
+# uniform can get the detective into staff-only archives; a civilian disguise
+# blends better in a crowd but does not automatically grant restricted access.
+COVER_IDENTITIES = [
+    ("Manor steward", "Dinner guest"),
+    ("Railway porter", "First-class passenger"),
+    ("Hotel attendant", "Traveling guest"),
+    ("Stagehand", "Theater patron"),
+    ("Archive clerk", "Book dealer"),
+    ("Garden assistant", "Botanical patron"),
+    ("Dock laborer", "Shipping agent"),
+    ("Observatory technician", "Visiting scholar"),
+    ("Court bailiff", "Newspaper correspondent"),
+    ("Crypt caretaker", "Family mourner"),
+]
+
+SECRET_REVEALS = [
+    "Inside the private office is a receipt signed by Evelyn. Collins was not improvising; he was being paid to fail.",
+    "A freight ledger names the train passenger who was supposedly dead long before the journey began.",
+    "A service schedule lists Rowan as both patient and prisoner. Fenwick's clinic was built to silence witnesses.",
+    "A hidden cue specifies a second blackout. Someone planned to kill the singer even if the first attempt failed.",
+    "The archive's original census names another surviving Blackwell heir. Evelyn has been lying about the family tree.",
+    "A second inventory describes the stolen specimen as a marker for an underground route, not a rare plant.",
+    "Pike's off-books manifest lists nine silver moth parcels, each delivered before a different murder.",
+    "The telescope's brass housing conceals a guest list. Evelyn attended meetings under a false name.",
+    "The true verdict is still here: the Lantern was not a society of benefactors but a mechanism for disappearing people.",
+    "The last secret is the cruelest: Evelyn chose the detective because each case would make vengeance feel inevitable.",
+]
+
+COVER_LINES = [
+    "The servants do not recognize your face, but they know the cut of the steward's coat. Walk. Do not hurry.",
+    "A porter can enter the baggage office without a second glance; a passenger cannot.",
+    "Hotel staff move everywhere except where they are expected to look. The ledger is behind the locked service wing.",
+    "Stagehands are invisible during scene changes. A patron in the wings is a scandal waiting to happen.",
+    "The registrar's office is marked PRIVATE. Only clerks and people who move very quietly cross its threshold.",
+    "A gardener can walk beneath the glass at midnight. The patron is confined to the lit walkway.",
+    "The crates have a path of their own. The right coat lets you move like one more dock worker.",
+    "An assistant's badge opens the dome controls. Without it, shadows and timing are your only allies.",
+    "A bailiff's jacket turns a locked courtroom into a corridor. A reporter's questions would raise alarms.",
+    "The caretaker knows where every crypt key belongs; the mourners know only where to stand.",
+]
+
+DECOY_LINES = [
+    "A coin strikes the marble. The watchman turns toward the sound rather than your footprints.",
+    "The metallic clink disappears under a hiss of steam. The guard breaks formation to investigate.",
+    "A coin rings against the bellhop's trolley. Footsteps hurry toward the wrong corridor.",
+    "A tiny sound in the darkened wings draws the stage guard away from the curtain.",
+    "An echo skips across the tiled archive. Someone searches the shelves you have already left.",
+    "The sound travels through glass and leaf. A watchman enters the wrong garden path.",
+    "A coin taps the dock planks. The watchman mistakes it for a loose mooring ring.",
+    "The dome amplifies the small metallic sound. The director's guard turns to investigate.",
+    "A clink against an iron rail sends the bailiff toward the old evidence room.",
+    "The coin falls into the stone silence. The caretaker looks toward the wrong tomb.",
+]
+
+RESTRICTED_ZONE = (370, 86, 515, 184)
+
+# Furniture footprint atlas. These dimensions come from the actual PixelArt
+# drawing methods below; a room's collision model is built from its artwork.
+# Decorative objects (rugs, papers, windows, footprints, tiny candles) never
+# block movement. Unlike v4, there are no invisible legacy desk rectangles.
+SOLID_FURNITURE = {
+    "bookcase": (0, 0, 51, 28), "bookshelf": (0, 0, 51, 28),
+    "desk": (0, 0, 63, 31), "table": (0, 0, 50, 24),
+    "armchair": (0, 0, 30, 24), "fireplace": (0, 0, 72, 34),
+    "piano": (0, 0, 78, 39), "bench": (0, 0, 48, 17),
+    "wardrobe": (0, 0, 32, 43), "counter": (0, 0, 76, 22),
+    "judgebench": (0, 0, 125, 47), "altar": (0, 0, 74, 47),
+    "coffin": (0, 0, 76, 32), "crate": (0, 0, 30, 27),
+    "barrel": (-9, -11, 10, 9), "suitcase": (0, -4, 23, 18),
+    "plant": (-9, -8, 10, 15), "pillar": (-14, -4, 14, 23),
+    "statue": (0, -11, 25, 30), "telescope": (-39, -10, 35, 50),
+    "scope": (0, 0, 22, 20), "globe": (-12, -12, 12, 12),
+    "coatstand": (-10, -17, 10, 29),
+}
+
+# The study has a visible walled-off staff office, with a walkable doorway.
+# The doorway itself is controlled by clothing or by careful sneaking.
+OFFICE_DOOR = (386, 423)
 
 
-class FieldWorld(World):
-    """Local, character-driven mining and construction over the combat engine."""
-    def __init__(self, level_id=0, tutorial=False):
-        self.level_id = level_id
-        self.level = LEVELS[level_id]
-        self.player = Engineer()
-        self.orders = {}
-        self.record = defaultdict(float)
-        self.tutorial = tutorial
-        self.tutorial_step = 0
-        self.tutorial_complete = False
-        self.selected_once = False
-        self.opened_robot = False
-        self.built_robots = 0
-        self.upgrades_completed = 0
-        self.mined_metal = 0
-        self.walk_distance = 0
-        self.mine_progress = 0
-        self.mine_target = None
-        self.feedback = []
-        self.last_action = ''
-        super().__init__(level_id)
-        self.coremax = self.corehp = self.level.core_health
-        self.money = 950
-        self.materials = {'metal': 58, 'circuits': 22, 'crystal': 8}
-        self.autoplay = True
-        self.intermission = 60.
-        self.break_duration=60.
-        self.tool_heat=0.
-        self.overheated=False
-        self.drill_level=0
-        self.strike_cooldown=0.
-        self.precision_used=False
-        self.mine_bonus=0
-        self.barrier_limit=(10,8,6)[level_id//3]
-        self.supply_pending=None
-        self.clean_wave=True
-        self.say('WASD to move • Hold E to mine or build • F places the selected blueprint nearby')
+def prop_collision(prop):
+    """Solid pixel-art footprint. Tiny render shadows don't block movement."""
+    kind, x, y, variant = prop
+    bounds = SOLID_FURNITURE.get(kind)
+    if bounds is None:
+        return None
+    ax, ay, bx, by = bounds
+    # Narrow visual leaves shouldn't become invisible broad force fields.
+    if kind == "plant":
+        ax, ay, bx, by = -7, 2, 8, 13
+    if kind == "coatstand":
+        ax, ay, bx, by = -4, 9, 5, 25
+    if kind == "telescope":
+        ax, ay, bx, by = -21, 10, 29, 36
+    return (x + ax, y + ay, x + bx, y + by)
 
-    def mining_duration(self,resource,key=None):
-        base={'metal':1.5,'circuits':2.1,'crystal':2.7}[resource]
-        hardness=1+.12*(self.level_id//3)
-        if key is not None:
-            hardness+=.08*((key[0]*3+key[1])%3)
-        return base*hardness/(1+.2*self.drill_level)
 
-    def barrier_count(self):
-        return sum(SPECS[b.kind]['role'] in ('wall','gate') for b in self.buildings.values())
+def walls_of_office():
+    left, top, right, bottom = RESTRICTED_ZONE
+    lo, hi = OFFICE_DOOR
+    return [
+        (left - 3, top, left + 2, bottom + 2),
+        (right - 2, top, right + 3, bottom + 2),
+        (left, top - 3, right, top + 2),
+        (left, bottom - 3, lo, bottom + 3),
+        (hi, bottom - 3, right, bottom + 3),
+    ]
 
-    def core_routes_open(self,extra=None):
-        blocked=set(self.terrain)
-        for key,b in self.buildings.items():
-            if not(b.role=='gate' and b.opened):blocked.add(key)
-        if extra is not None:blocked.add(extra)
-        exits=[p for p in World.neighbors(self.core) if p not in blocked]
-        if len(exits)<2:return False
-        reached={self.core};queue=deque([self.core])
-        while queue:
-            p=queue.popleft()
-            for n in self.neighbors(p):
-                if n not in blocked and n not in reached:
-                    reached.add(n);queue.append(n)
-        return all(route[-1] in reached for route in self.approach_routes)
 
-    def precision_strike(self):
-        context=self.local_context()
-        if not context or context[0]!='deposit' or self.overheated or self.strike_cooldown>0:
-            return False
-        resource,_=self.deposits[context[1]]
-        duration=self.mining_duration(resource,context[1])
-        fraction=self.mine_progress/duration
-        self.strike_cooldown=.4
-        if .52<=fraction<=.78 and not self.precision_used:
-            self.precision_used=True
-            self.mine_bonus=2 if resource=='metal' else 1
-            self.mine_progress+=duration*.22
-            self.tool_heat=max(0,self.tool_heat-.18)
-            self.fx('text',self.player.pos,'#f6df8b',.65,text='Good hit!')
+def build_collisions(props):
+    """Use the same prop list for what we see and what blocks movement."""
+    solids = [
+        (0, 0, WORLD_W, 38),
+        (0, 0, 20, WORLD_H),
+        (WORLD_W - 20, 0, WORLD_W, WORLD_H),
+        (0, WORLD_H - 18, WORLD_W, WORLD_H),
+    ]
+    solids.extend(box for p in props if (box := prop_collision(p)) is not None)
+    return solids
+
+
+def solid_at(level, x, y, radius=4):
+    for x1, y1, x2, y2 in level.collisions:
+        if x + radius > x1 and x - radius < x2 and y + radius > y1 and y - radius < y2:
             return True
-        self.tool_heat=min(1,self.tool_heat+.14)
-        self.mine_progress=max(0,self.mine_progress-duration*.12)
-        self.say('Watch the marker. Press Space in the green section.')
-        return False
-
-    def incoming_spawns(self):
-        initial=1 if self.level_id<3 else 2 if self.level_id<6 else 3
-        count=min(len(self.spawns),initial+max(0,self.wave-1)//5)
-        return self.spawns[:count]
-
-    @staticmethod
-    def break_after(wave):
-        return 60. if wave%5==0 else 15.
-
-    def claim_supply(self,choice):
-        if self.supply_pending is None or self.active or distance(self.player.pos,self.corepos)>1.95:
-            return False
-        if choice=='materials':
-            self.materials['metal']+=48;self.materials['circuits']+=16;self.materials['crystal']+=3
-            message='+48 Metal, +16 Parts, +3 Crystals'
-        elif choice=='repair':
-            self.corehp=min(self.coremax,self.corehp+900)
-            for b in self.buildings.values():b.hp=min(b.stats()['hp'],b.hp+b.stats()['hp']*.35)
-            message='Core +900 health; buildings repaired by 35%'
-        elif choice=='money':
-            amount=250+self.wave*10;self.money+=amount;message=f'+${amount}'
-        else:return False
-        self.supply_pending=None
-        self.notice('Supplies collected',message,'#f4d78f')
-        return True
-
-    def buy_drill(self):
-        if self.drill_level>=3 or distance(self.player.pos,self.corepos)>1.95:return False
-        rank=self.drill_level+1
-        money,metal,parts=220*rank,20*rank,8*rank
-        if self.money<money or self.materials['metal']<metal or self.materials['circuits']<parts:
-            self.say('Not enough supplies for the drill upgrade.')
-            return False
-        self.money-=money;self.materials['metal']-=metal;self.materials['circuits']-=parts
-        self.drill_level+=1
-        self.notice('Drill upgraded',f'Level {self.drill_level}: faster mining and cooling.','#b6e7d5')
-        return True
-
-    def generate_map(self):
-        style = self.level.terrain_style
-        for y in range(1, NY-1):
-            for x in range(1, NX-1):
-                p = (x, y)
-                blocked = False
-                if style == 'meadow':
-                    blocked = (x-7)**2+(y-5)**2<5 or (x-22)**2+(y-17)**2<5
-                elif style == 'grove':
-                    blocked = any((x-a)**2+(y-b)**2<5 for a,b in ((6,6),(21,5),(7,17),(23,16)))
-                elif style == 'river':
-                    blocked = x in (7,8) and y not in (4,5,10,11,16,17)
-                elif style == 'quarry':
-                    blocked = (5<=x<=8 and 4<=y<=6) or (19<=x<=22 and 15<=y<=18)
-                elif style == 'canyon':
-                    blocked = x in (7,8,20,21) and y not in (4,5,10,11,16,17)
-                elif style == 'wetland':
-                    blocked = any((x-a)**2+(y-b)**2<7 for a,b in ((6,6),(21,6),(6,17),(22,17)))
-                elif style == 'industrial':
-                    blocked = ((4<=x<=8 or 20<=x<=24) and y in (5,6,15,16)) or (x==19 and 2<=y<=5)
-                elif style == 'storm':
-                    blocked = ((x-6)**2+(y-8)**2<10) or ((x-22)**2+(y-15)**2<10)
-                else:
-                    blocked = ((x in (6,21) and y not in (5,6,11,12,17)) or
-                               (y in (4,18) and 10<=x<=17 and x not in (13,14)))
-                if blocked and distance(p,self.core)>4.4:
-                    self.terrain.add(p)
-        deposits = (
-            (12,14,'metal'), (17,13,'circuits'), (13,8,'crystal'),
-            (4,11,'metal'), (23,10,'metal'), (15,18,'circuits'),
-            (11,3,'metal'), (24,3,'crystal'), (3,19,'circuits'),
-        )
-        for x,y,resource in deposits:
-            self.terrain.discard((x,y))
-            for q in self.neighbors((x,y)):
-                self.terrain.discard(q)
-            self.deposits[x,y] = [resource, 700 if resource=='metal' else 400]
-        for p in self.spawns:
-            self.terrain.discard(p)
-        # Guarantee space to leave and circle the core.
-        for x in range(11,18):
-            for y in range(9,15):
-                self.terrain.discard((x,y))
-
-        self.generate_approaches()
-
-    def notice(self,title,body='',color='#b8e2c1'):
-        self.feedback.append({'title': title, 'body': body, 'color': color, 'age':0., 'life':4.})
-        self.feedback = self.feedback[-3:]
-
-    def generate_approaches(self):
-        self.core_build_radius=7.
-        v=self.level_id%3
-        plans=(
-            [(0,4),(3,4),(3,7+v),(6,7+v),(7,10),(9,10)],
-            [(27,17),(24,17),(24,14-v),(22,14-v),(20,12)],
-            [(13,0),(13,2),(16+self.level_id%2,2),(16+self.level_id%2,5),(15,6)],
-            [(13,21),(13,20),(10+v,20),(10+v,18),(12,17)],
-        )
-        plans=list(plans)+[
-            [(0,18),(3,18),(3,15),(6,15),(9,14)],
-            [(25,0),(25,3),(23,3),(23,7),(19,7)],
-            [(26,21),(26,19),(23,19),(23,16),(19,15)],
-        ]
-        plans=plans[:(2,3,3,4,4,5,5,6,7)[self.level_id]]
-        self.spawns=[route[0] for route in plans]
-        self.approach_routes=[]
-        self.path_tiles=set()
-        for number,waypoints in enumerate(plans):
-            cells=[waypoints[0]]
-            for endpoint in waypoints[1:]:
-                x,y=cells[-1]
-                while x!=endpoint[0]:
-                    x+=1 if endpoint[0]>x else -1
-                    cells.append((x,y))
-                while y!=endpoint[1]:
-                    y+=1 if endpoint[1]>y else -1
-                    cells.append((x,y))
-            trimmed=[]
-            for cell in cells:
-                trimmed.append(cell)
-                if self.in_core_area((cell[0]+.5,cell[1]+.5)):
-                    break
-            self.approach_routes.append(trimmed)
-            for cell in trimmed:
-                self.terrain.discard(cell)
-                if not self.in_core_area((cell[0]+.5,cell[1]+.5)):
-                    self.path_tiles.add(cell)
-            # Ensure resources never sit on an enemy trail.
-            for cell in list(self.deposits):
-                if cell in self.path_tiles:
-                    data=self.deposits.pop(cell)
-                    candidates=[(x,y) for x in range(2,NX-2) for y in range(2,NY-2)
-                                if (x,y) not in self.terrain and (x,y) not in self.path_tiles
-                                and (x,y) not in self.deposits and (x,y)!=self.core]
-                    if candidates:
-                        chosen=min(candidates,key=lambda p:distance(p,cell))
-                        self.deposits[chosen]=data
-
-        self.route_gates={route[-1] for route in self.approach_routes}
-        self.reserved_trails=self.path_tiles|self.route_gates
-
-    def neighbors(self,p):
-        candidates=World.neighbors(p)
-        if not hasattr(self,'reserved_trails'):
-            return candidates
-        return [cell for cell in candidates if cell in self.reserved_trails
-                or self.in_core_area((cell[0]+.5,cell[1]+.5))]
-
-    def in_core_area(self,pos):
-        return distance(pos,self.corepos)<=getattr(self,'core_build_radius',7.)
-
-    def approach_destination(self,e):
-        if getattr(e,'route_entered',False):
-            return None
-        if self.in_core_area(e.pos):
-            e.route_entered=True
-            return None
-        if not hasattr(e,'route_number'):
-            candidates=[(distance(e.pos,(cell[0]+.5,cell[1]+.5)),route_index,index)
-                        for route_index,route in enumerate(self.approach_routes)
-                        for index,cell in enumerate(route)]
-            _,e.route_number,e.route_index=min(candidates)
-        route=self.approach_routes[e.route_number]
-        index=e.route_index
-        target=(route[index][0]+.5,route[index][1]+.5)
-        if distance(e.pos,target)<.035 and index<len(route)-1:
-            e.route_index+=1
-            cell=route[e.route_index]
-            target=(cell[0]+.5,cell[1]+.5)
-        return target
-
-    def can_place(self,x,y,kind):
-        if (x,y) in getattr(self,'reserved_trails',set()):
-            return 'Enemy trail: build beside it, not on it.'
-        role=SPECS[kind]['role']
-        if role in ('wall','gate'):
-            if distance((x+.5,y+.5),self.corepos)<2.5:
-                return 'Keep walls outside the small circle around the core.'
-            if self.barrier_count()>=self.barrier_limit:
-                return f'Wall limit reached ({self.barrier_limit}). Sell one to move it.'
-        if role=='mine' and sum(SPECS[b.kind]['role']=='mine' for b in self.buildings.values())>=2:
-            return 'You can build two mining stations. Mine other deposits by hand.'
-        error=super().can_place(x,y,kind)
-        if error:return error
-        if not self.core_routes_open((x,y)):
-            return 'Keep routes into the core open. Use walls as cover, not a sealed ring.'
-        return ''
+    return False
 
 
-    def walkable(self,x,y,radius=.24):
-        if x<radius or y<radius or x>NX-radius or y>NY-radius:
-            return False
-        for dx,dy in ((-radius,-radius),(radius,-radius),(-radius,radius),(radius,radius),(0,0)):
-            p = (int(x+dx),int(y+dy))
-            b = self.buildings.get(p)
-            if p in self.terrain or p==self.core:
-                return False
-            if b and not(b.role=='gate' and b.opened):
-                return False
-        return True
+def find_nearest_open(level, xy, radius=4):
+    """Snap accidental old saves and NPC positions to the nearest free tile."""
+    x, y = xy
+    if not solid_at(level, x, y, radius):
+        return (float(x), float(y))
+    for ring in range(4, 110, 4):
+        candidates = []
+        for angle in range(0, 360, 20):
+            a = math.radians(angle)
+            nx, ny = x + math.cos(a) * ring, y + math.sin(a) * ring
+            if 24 <= nx <= WORLD_W - 24 and 42 <= ny <= WORLD_H - 23 and not solid_at(level, nx, ny, radius):
+                candidates.append((nx, ny))
+        if candidates:
+            return min(candidates, key=lambda p: (p[0] - x)**2 + (p[1] - y)**2)
+    return (float(level.start[0]), float(level.start[1]))
 
-    def move_player(self,dt,axis,sprint=False):
-        p = self.player
-        p.contact_cooldown = max(0,p.contact_cooldown-dt)
-        p.stagger = max(0,p.stagger-dt)
-        p.working = False
-        p.tool_target = None
-        dx,dy = axis
-        length = math.hypot(dx,dy)
-        speed = 4.1 if sprint else 3.15
-        if length:
-            dx,dy = dx/length,dy/length
-            p.angle = math.atan2(dy,dx)
-        if p.stagger:
-            p.vx *= max(0,1-dt*5)
-            p.vy *= max(0,1-dt*5)
-        else:
-            target_x,target_y = dx*speed,dy*speed
-            response = min(1,dt*22)
-            p.vx += (target_x-p.vx)*response
-            p.vy += (target_y-p.vy)*response
-        old = p.pos
-        nx = p.x+p.vx*dt
-        if self.walkable(nx,p.y):
-            p.x = nx
-        else:
-            p.vx = 0
-        ny = p.y+p.vy*dt
-        if self.walkable(p.x,ny):
-            p.y = ny
-        else:
-            p.vy = 0
-        traveled = distance(old,p.pos)
-        self.walk_distance += traveled
-        p.stride += traveled*9
-        p.moving = traveled>.0005
-        # The engineer never inflicts contact damage or blocks enemy movement.
-        if not p.contact_cooldown:
-            for e in self.enemies:
-                if e.dead:
-                    continue
-                radius = .9 if e.name=='Goliath Beetle' else .57
-                if distance(p.pos,e.pos)<radius:
-                    vx,vy = p.x-e.x,p.y-e.y
-                    length = math.hypot(vx,vy)
-                    if length<.01:
-                        vx,vy,length = -math.cos(e.angle),-math.sin(e.angle),1
-                    p.vx,p.vy = vx/length*5.4,vy/length*5.4
-                    p.stagger = .32
-                    p.contact_cooldown = .85
-                    self.fx('ring',p.pos,'#ffe1a1',.35,.6)
-                    self.notice('Knocked back','Your tools cannot hurt bugs. Let the robots defend you.','#edc28b')
-                    break
 
-    def local_context(self):
-        pos = self.player.pos
-        choices = []
-        for key,order in self.orders.items():
-            d = distance(pos,order.pos)
-            if d<=1.72:
-                choices.append((d-.45,'order',key))
-        for key,(resource,amount) in self.deposits.items():
-            d = distance(pos,(key[0]+.5,key[1]+.5))
-            if d<=1.62 and amount>0:
-                choices.append((d,'deposit',key))
-        for key,b in self.buildings.items():
-            if isinstance(b,Foundation) or key in self.orders:
+class NavigationGrid:
+    """Compact room-scale A*: click movement and guard patrol share one map."""
+    def __init__(self, level, step=6):
+        self.level = level
+        self.step = step
+        self.width = WORLD_W // step + 1
+        self.height = WORLD_H // step + 1
+        self.clear = {
+            (i, j) for i in range(4, self.width - 3)
+            for j in range(7, self.height - 3)
+            if not solid_at(level, i * step, j * step, 5)
+        }
+
+    def closest(self, xy):
+        i = round(xy[0] / self.step)
+        j = round(xy[1] / self.step)
+        if (i, j) in self.clear:
+            return (i, j)
+        for rad in range(1, 16):
+            options = [(i + dx, j + dy) for dx in range(-rad, rad + 1)
+                       for dy in range(-rad, rad + 1)
+                       if abs(dx) == rad or abs(dy) == rad]
+            options = [pt for pt in options if pt in self.clear]
+            if options:
+                return min(options, key=lambda pt: (pt[0] - i)**2 + (pt[1] - j)**2)
+        return None
+
+    def path(self, start, goal):
+        src, dst = self.closest(start), self.closest(goal)
+        if src is None or dst is None:
+            return []
+        if src == dst:
+            return [goal] if not solid_at(self.level, *goal) else []
+        q = [(0, src)]
+        g = {src: 0}
+        came = {}
+        closed = set()
+        while q:
+            _, here = heapq.heappop(q)
+            if here in closed:
                 continue
-            d = distance(pos,b.pos)
-            if d<=1.7:
-                choices.append((d+.05,'robot',key))
-        d = distance(pos,self.corepos)
-        if d<=1.9:
-            choices.append((d+.1,'core',self.core))
-        if not choices:
-            return None
-        _,kind,key = min(choices,key=lambda item:item[0])
-        return kind,key
+            closed.add(here)
+            if here == dst:
+                break
+            i, j = here
+            for nb in ((i + 1,j),(i-1,j),(i,j+1),(i,j-1)):
+                if nb not in self.clear or nb in closed:
+                    continue
+                cost = g[here] + 1
+                if cost < g.get(nb, 1e10):
+                    came[nb] = here
+                    g[nb] = cost
+                    heapq.heappush(q, (cost + abs(nb[0]-dst[0]) + abs(nb[1]-dst[1]), nb))
+        if dst not in came:
+            return []
+        path = []
+        cur = dst
+        while cur != src:
+            path.append((cur[0]*self.step, cur[1]*self.step))
+            cur = came[cur]
+        path.reverse()
+        # Remove collinear waypoints without allowing a shortcut through walls.
+        compact = []
+        for v in path:
+            if len(compact) > 1:
+                a, b = compact[-2:]
+                if (a[0] == b[0] == v[0]) or (a[1] == b[1] == v[1]):
+                    compact[-1] = v
+                    continue
+            compact.append(v)
+        if not solid_at(self.level, *goal):
+            compact.append(goal)
+        return compact
 
-    def blueprint_tile(self):
-        p = self.player
-        return int(p.x+math.cos(p.angle)*1.35),int(p.y+math.sin(p.angle)*1.35)
 
-    def site_error(self,x,y,kind):
-        if distance(self.player.pos,(x+.5,y+.5))>2.05:
-            return 'Walk closer to the construction site.'
-        if distance(self.player.pos,(x+.5,y+.5))<.78:
-            return 'Leave room for yourself. Face an adjacent empty tile.'
-        if (x,y) in self.orders:
-            return 'There is already work here.'
-        return self.can_place(x,y,kind)
+def make_level(chapter: int) -> Level:
+    ch = CHAPTERS[chapter]
+    props = list(ROOM_PROPS[chapter])
+    objs = [Item("uniform", "Clothes left unattended", 90, 278, "coatstand", "A second identity hangs among these coats.")]
+    for j, (name, detail) in enumerate(ch["clues"]):
+        # Evidence belongs to the public investigation, not the guarded
+        # infiltration. The private office contains OPTIONAL, story-rich proof.
+        x, y = EVIDENCE_COORDS[chapter][j]
+        if RESTRICTED_ZONE[0] - 12 < x < RESTRICTED_ZONE[2] + 12 and y < RESTRICTED_ZONE[3] + 16:
+            x, y = 327 + (chapter % 3) * 8, 268 + (j % 2) * 14
+        objs.append(Item(f"clue_{j}", name, x, y, EVIDENCE_SHAPES[chapter][j], detail))
+    # Quiet optional environmental discoveries also exist: these offer narrative
+    # texture but never replace the three mandatory pieces of physical proof.
+    optional_coords = [(188, 303), (360, 110), (487, 290)]
+    for j, p in enumerate(optional_coords):
+        objs.append(Item(f"optional_{j}", f"Margin note {j+1}", p[0], p[1], "note", ch["cinematic"][j + 6], True))
 
-    def start_construction(self,kind):
-        x,y = self.blueprint_tile()
-        error = self.site_error(x,y,kind)
-        if error:
-            self.say(error)
-            return False
-        spec = SPECS[kind]
-        self.money -= spec['price']
-        paid = {}
-        for resource in self.materials:
-            amount = spec.get(resource,0)
-            self.materials[resource] -= amount
-            paid[resource] = amount
-        duration = 2.5 if spec['role']=='wall' else 3 if spec['role']=='gate' else 5 if kind<12 else 4
-        self.buildings[x,y] = Foundation(x,y,kind)
-        self.orders[x,y] = WorkOrder(x,y,kind,duration,cost=spec['price'],paid_materials=paid,name=spec['name'])
-        self.repath()
-        self.record['sites'] += 1
-        self.notice('Construction site ready','Stand beside it and hold E to build. Leaving pauses the work.')
-        return True
 
-    def request_upgrade(self,key,path):
-        b = self.buildings.get(key)
-        if not b or isinstance(b,Foundation) or b.kind>=12 or key in self.orders:
-            return False
-        if distance(self.player.pos,b.pos)>1.75:
-            self.say('Walk beside this robot to upgrade it.')
-            return False
-        if b.upgrade_locked(path):
-            self.say('That path is locked. Only tier 1 of the other path is allowed.')
-            return False
-        upgrade = b.next_upgrade(path)
-        if not upgrade or self.money<upgrade['price']:
-            self.say('Not enough dollars for that upgrade.')
-            return False
-        self.money -= upgrade['price']
-        self.orders[key] = WorkOrder(b.x,b.y,b.kind,3+b.paths[path]*1.5,task='upgrade',path=path,
-                                    cost=upgrade['price'],name=upgrade['name'])
-        self.notice('Upgrade prepared','Hold E beside this robot to install it. The robot keeps defending.')
-        return True
+    # Hiding spots now correspond to actual visible wardrobes, planters, or
+    # stacked crates. There are no floating marker letters at their positions.
+    props.extend([
+        ("wardrobe", 65, 306, 0),
+        ("plant", 479, 306, chapter % 3),
+        ("crate", 34, 201, chapter % 3),
+    ])
+    props.append(("coatstand", 90, 263, chapter % 4))
+    civilians = [
+        Agent(363, 313, "left", coat=(chapter + 1) % 4, hair=(chapter + 2) % 4, skin=1),
+        Agent(393, 319, "right", coat=(chapter + 2) % 4, hair=(chapter + 3) % 4, skin=0),
+    ]
+    level = Level(
+        chapter=chapter,
+        theme=THEMES[chapter]["name"],
+        props=props,
+        collisions=build_collisions(props),
+        objects=objs,
+        witness=Agent(204, 313, "down", coat=(chapter + 1) % 4, hair=chapter % 4, skin=(chapter + 1) % 4),
+        killer=Agent(462, 148, "left", coat=(chapter + 2) % 4, hair=(chapter + 3) % 4, skin=1, hat=chapter % 2 == 0),
+        civilians=civilians,
+        hide_positions=[(81, 320), (485, 319), (52, 212)],
+        blend_zones=[(377, 316, 48)],
+        patrol=[(229, 246), (412, 247), (405, 302), (270, 287)],
+        start=(121, 333),
+        cards=[ch["title"], ch["room_name"], ch["victim"]],
+    )
+    # Characters should never materialize within a visible solid prop.
+    level.start = find_nearest_open(level, level.start)
+    level.witness.x, level.witness.y = find_nearest_open(level, level.witness.feet)
+    level.killer.x, level.killer.y = find_nearest_open(level, level.killer.feet)
+    for npc in level.civilians:
+        npc.x, npc.y = find_nearest_open(level, npc.feet)
+    level.patrol = [find_nearest_open(level, pt) for pt in level.patrol]
+    return level
 
-    def request_repair(self,key):
-        b = self.buildings.get(key)
-        if not b or key in self.orders or distance(self.player.pos,b.pos)>1.75:
-            return False
-        missing = b.stats()['hp']-b.hp
-        if missing<1:
-            self.say('This structure is already fully repaired.')
-            return False
-        cost = math.ceil(missing*.08)
-        metal = math.ceil(missing*.02)
-        if self.money<cost or self.materials['metal']<metal:
-            self.say('Repairs need more dollars or Metal.')
-            return False
-        self.money -= cost
-        self.materials['metal'] -= metal
-        self.orders[key] = WorkOrder(b.x,b.y,b.kind,2.5,task='repair',cost=cost,name='Repair')
-        return True
 
-    def finish_order(self,key):
-        order = self.orders.pop(key)
-        b = self.buildings.get(key)
-        if not b:
-            return
-        if order.task=='build':
-            finished = Building(order.x,order.y,order.kind)
-            finished.hp = finished.stats()['hp']*max(.3,min(1,b.hp/220))
-            self.buildings[key] = finished
-            self.built_robots += int(order.kind<12)
-            self.repath()
-            self.notice(order.name+' online','Walk up and press E to inspect, upgrade or repair.','#aee5bd')
-        elif order.task=='upgrade':
-            old_max = b.stats()['hp']
-            b.paths[order.path] += 1
-            b.invested += order.cost
-            b.hp += b.stats()['hp']-old_max
-            self.upgrades_completed += 1
-            self.notice(order.name+' installed','Your robot is ready.','#edd28d')
+# -----------------------------------------------------------------------------
+# PIXEL-ART RENDERER
+# All rooms are rendered once at a fixed logical pixel resolution, then scaled
+# using nearest-neighbor sampling. The resulting look is deliberate, rather
+# than a collection of stroked rectangles redrawn around the player.
+# -----------------------------------------------------------------------------
+
+class PixelArt:
+    def __init__(self, chapter: int, seed: int = 101):
+        self.chapter = chapter
+        self.palette = THEMES[chapter]
+        self.rng = random.Random(seed + chapter * 1009)
+        self.image = Image.new("RGB", (WORLD_W, WORLD_H), self.palette["floor"])
+        self.d = ImageDraw.Draw(self.image)
+        self.lights = []
+        self.particles = []
+
+    def rect(self, xy, fill, outline=None, width=1):
+        self.d.rectangle(tuple(map(int, xy)), fill=fill, outline=outline, width=width)
+
+    def line(self, coords, fill, width=1, joint="curve"):
+        self.d.line(tuple(int(v) for v in coords), fill=fill, width=width, joint=joint)
+
+    def ellipse(self, box, fill, outline=None, width=1):
+        self.d.ellipse(tuple(map(int, box)), fill=fill, outline=outline, width=width)
+
+    def polygon(self, points, fill, outline=None):
+        self.d.polygon([(int(x), int(y)) for x, y in points], fill=fill, outline=outline)
+
+    def stroke(self, x, y, w, h, fill, border=(10, 16, 22)):
+        self.rect((x, y, x + w, y + h), fill, border)
+        self.line((x + 2, y + 2, x + w - 2, y + 2), light(fill, .07))
+
+    def twinkle(self, x, y, color=(239, 201, 129)):
+        self.rect((x, y, x + 1, y + 1), color)
+        self.rect((x - 2, y, x + 3, y), color)
+        self.rect((x, y - 2, x, y + 3), color)
+
+    def noise(self, count=3000):
+        # Slightly irregular color variation gives the tiles a hand-crafted
+        # texture without an artificial glossy gradient.
+        p = self.palette
+        for _ in range(count):
+            x = self.rng.randrange(20, WORLD_W - 20)
+            y = self.rng.randrange(39, WORLD_H - 19)
+            col = p["floor2"] if self.rng.random() < .37 else shade(p["floor"], .82)
+            self.d.point((x, y), fill=col)
+
+    def floor(self):
+        p = self.palette
+        self.rect((20, 35, WORLD_W - 20, WORLD_H - 18), p["floor"])
+        if self.chapter in {0, 2, 4, 8}:
+            for y in range(39, WORLD_H - 18, 18):
+                for x in range(20 + (9 if y // 18 % 2 else 0), WORLD_W - 20, 32):
+                    self.rect((x, y, min(x + 31, WORLD_W - 20), y + 17),
+                              p["floor"] if ((x + y) // 10) % 4 else p["floor2"], p["floor_line"])
+                    self.line((x + 3, y + 3, x + 14, y + 3), shade(p["floor_line"], .78))
+        elif self.chapter in {1, 3, 6}:
+            for y in range(40, WORLD_H - 20, 11):
+                self.line((22, y, WORLD_W - 22, y), p["floor_line"])
+                for x in range(22 + (13 if (y // 11) % 2 else 0), WORLD_W - 22, 56):
+                    self.line((x, y + 1, x, y + 9), shade(p["floor_line"], .80))
         else:
-            b.hp = b.stats()['hp']
-            self.notice('Repairs complete',b.spec['name'])
-        self.fx('upgrade',order.pos,'#f4d393',.9,1.2)
+            for y in range(38, WORLD_H - 18, 23):
+                for x in range(20, WORLD_W - 20, 23):
+                    fill = p["floor2"] if ((x // 23) ^ (y // 23)) & 1 else p["floor"]
+                    self.rect((x, y, x + 22, y + 22), fill, p["floor_line"])
+        self.noise(750)
 
-    def use_tool(self,dt,holding):
-        p=self.player
-        self.strike_cooldown=max(0,self.strike_cooldown-dt)
-        context=self.local_context()
-        mining=holding and context and context[0]=='deposit' and not p.stagger
-        if self.overheated:
-            self.tool_heat=max(0,self.tool_heat-dt*(.16 if mining else .52))
-            if self.tool_heat<=.24:
-                self.overheated=False
-                self.notice('Tool cooled','Ready to mine again.','#b6e3c3')
-            mining=False
-        elif not mining:
-            self.tool_heat=max(0,self.tool_heat-dt*(.42+.06*self.drill_level))
-        if not holding or not context or p.stagger:
+    def boundary(self):
+        p = self.palette
+        self.rect((0, 0, WORLD_W, 38), p["wall"])
+        self.rect((0, 0, 19, WORLD_H), p["wall"])
+        self.rect((WORLD_W - 19, 0, WORLD_W, WORLD_H), p["wall"])
+        self.rect((0, WORLD_H - 17, WORLD_W, WORLD_H), p["wall"])
+        self.rect((19, 31, WORLD_W - 19, 36), p["trim"])
+        self.rect((19, 37, WORLD_W - 19, 39), shade(p["trim"], .55))
+        self.rect((19, WORLD_H - 21, WORLD_W - 19, WORLD_H - 18), shade(p["trim"], .70))
+        for x in range(24, WORLD_W - 20, 35):
+            self.line((x, 4, x, 28), p["wall2"])
+            self.rect((x + 3, 9, x + 29, 23), p["wall2"], shade(p["wall2"], .74))
+            self.rect((x + 7, 12, x + 26, 19), shade(p["wall2"], .86))
+        for y in range(44, WORLD_H - 25, 39):
+            self.line((4, y, 15, y), p["trim"])
+            self.line((WORLD_W - 15, y, WORLD_W - 3, y), p["trim"])
+        # small understated window light sources set into the far wall
+        for wx in (74, 369, 476):
+            self.window(wx, 6, 26, 27, self.palette["warm"])
+
+    def window(self, x, y, w=24, h=25, color=(235, 177, 92)):
+        # Architectural fixtures stay within interior wall bands; a window
+        # that crosses the world border is simply not rendered half-cut.
+        if x < 22 or x + w > WORLD_W - 22 or y < 2 or y + h > WORLD_H - 22:
             return
-        kind,key=context
-        if kind=='order':
-            order=self.orders.get(key)
-            if order is None:return
-            p.working=True;p.tool_target=order.pos;p.tool_time+=dt
-            order.progress+=dt
-            if int(order.progress*7)!=int((order.progress-dt)*7):
-                self.fx('hit',order.pos,'#f5d493',.2,.12)
-            if order.progress>=order.duration:self.finish_order(key)
-        elif kind=='deposit' and mining:
-            if self.mine_target!=key:
-                self.mine_target=key;self.mine_progress=0;self.precision_used=False;self.mine_bonus=0
-            resource,remaining=self.deposits[key]
-            duration=self.mining_duration(resource,key)
-            p.working=True;p.tool_target=(key[0]+.5,key[1]+.5);p.tool_time+=dt
-            self.mine_progress+=dt
-            self.tool_heat=min(1,self.tool_heat+dt*.18)
-            if self.mine_progress>=duration:
-                self.mine_progress-=duration
-                amount=min(remaining,({'metal':4,'circuits':2,'crystal':1}[resource])+self.mine_bonus)
-                self.deposits[key][1]-=amount
-                self.materials[resource]+=amount
-                if resource=='metal':self.mined_metal+=amount
-                self.mine_bonus=0;self.precision_used=False
-                self.fx('text',p.tool_target,RESOURCE_COLORS[resource],.7,text=f'+{amount} {RESOURCE_NAMES[resource]}')
-                self.fx('hit',p.tool_target,RESOURCE_COLORS[resource],.25,.2)
-            if self.tool_heat>=1:
-                self.overheated=True
-                self.notice('Tool overheated','Release E to cool it faster.','#f2b589')
+        self.stroke(x, y, w, h, (20, 31, 51), (124, 96, 69))
+        self.rect((x + 4, y + 3, x + w - 4, y + h - 4), color)
+        self.rect((x + 6, y + 3, x + 8, y + h - 4), shade(color, .78))
+        self.line((x + w // 2, y + 3, x + w // 2, y + h - 3), (72, 55, 50))
+        self.line((x + 3, y + h // 2, x + w - 4, y + h // 2), (72, 55, 50))
+        self.lights.append((x + w / 2, y + h / 2, 40, color))
 
-        # No branch attacks insects. E is exclusively a mining / construction tool.
+    def small_rug(self, x, y, w, h, color=None):
+        """Render a tightly bounded, pixel-woven rug with no clipped triangles.
 
-    def choose_target(self,b,candidates):
-        priority=b.stats().get('priority',False)
-        armored=('Beetle','Stag Beetle','Ladybug','Goliath Beetle')
-        return min(candidates,key=lambda e:(0 if not priority or e.name in armored else 1,
-                                           distance(e.pos,self.corepos)))
+        V3's repeated triangle border motifs sometimes extended beyond the
+        carpet edge; at nearest-neighbor scaling they became jagged gold
+        spikes that looked like rendering artifacts. This version uses small,
+        square stitches and muted diamond-shaped rosettes drawn entirely
+        inside the patterned border.
+        """
+        p = self.palette
+        color = color or p["rug"]
+        edging = p["rug_border"]
+        dark = shade(color, .70)
+        trim = shade(edging, .76)
+        self.rect((x, y, x + w, y + h), dark, edging)
+        self.rect((x + 3, y + 3, x + w - 3, y + h - 3), edging)
+        self.rect((x + 7, y + 7, x + w - 7, y + h - 7), color)
+        self.rect((x + 11, y + 11, x + w - 11, y + h - 11), None, trim)
+        # Regular embroidered stitches, always confined to the border.
+        for px in range(x + 10, x + w - 9, 10):
+            self.rect((px, y + 5, px + 3, y + 6), color)
+            self.rect((px, y + h - 6, px + 3, y + h - 5), color)
+        for py in range(y + 11, y + h - 10, 11):
+            self.rect((x + 5, py, x + 6, py + 3), color)
+            self.rect((x + w - 6, py, x + w - 5, py + 3), color)
+        # Restrained interior woven rosettes: square/diamond pixel clusters.
+        # Not polygons, so nearest-neighbor zoom produces no diagonal spikes.
+        if w >= 80 and h >= 47:
+            cy = y + h // 2
+            for cx in range(x + 30, x + w - 26, 32):
+                self.rect((cx - 4, cy - 1, cx + 4, cy + 1), trim)
+                self.rect((cx - 1, cy - 4, cx + 1, cy + 4), trim)
+                self.rect((cx - 2, cy - 2, cx + 2, cy + 2), color)
 
-    def start_wave(self,automatic=False):
-        if self.intermission>0 or self.active or self.wave>=40 or self.outcome:
-            return False
-        super().start_wave()
-        self.clean_wave=True
-        self.supply_pending=None
-        plan=WAVE_PLANS[self.wave-1]
-        names=list(self.queue)
-        if plan.focus!='Goliath Beetle':
-            for i in range(min(8,len(names)//4)):names[i*4]=plan.focus
-        self.queue=deque(names)
-        self.notice(f'Wave {self.wave}',plan.description,'#f3c18e')
-        return True
+    def bookcase(self, x, y, variant=0):
+        self.stroke(x, y, 51, 28, (73, 48, 37), (27, 21, 23))
+        self.rect((x + 2, y + 2, x + 48, y + 5), (119, 82, 55))
+        spine = [(132, 70, 66), (39, 71, 93), (114, 90, 52), (56, 82, 67), (77, 58, 79), (164, 116, 71)]
+        for row in range(2):
+            yy = y + 7 + row * 10
+            for col in range(9):
+                xx = x + 5 + col * 5
+                h = 7 if (col * 7 + row + variant) % 3 else 5
+                color = spine[(col + row * 4 + variant) % len(spine)]
+                self.rect((xx, yy + (7 - h), xx + 3, yy + 8), color, (21, 17, 19))
+                if col % 3 == 0:
+                    self.line((xx + 1, yy + 2, xx + 1, yy + 6), (207, 160, 104))
+            self.line((x + 3, yy + 10, x + 48, yy + 10), (146, 103, 69))
+        self.rect((x + 3, y + 24, x + 48, y + 27), (41, 27, 24))
 
+    def desk(self, x, y, variant=0):
+        self.ellipse((x + 3, y + 29, x + 64, y + 36), (24, 18, 22))
+        self.stroke(x, y, 63, 31, (103, 65, 45), (40, 28, 26))
+        self.rect((x + 4, y + 4, x + 59, y + 26), (121, 80, 52), (150, 102, 62))
+        self.line((x + 5, y + 10, x + 58, y + 10), (86, 50, 35))
+        self.line((x + 10, y + 22, x + 53, y + 22), (88, 50, 33))
+        self.rect((x + 12, y + 6, x + 27, y + 16), (205, 181, 137), (116, 98, 82))
+        self.line((x + 15, y + 10, x + 24, y + 10), (111, 86, 71))
+        self.rect((x + 47, y + 11, x + 52, y + 14), (198, 168, 93))
+        if variant % 2:
+            self.rect((x + 28, y + 17, x + 41, y + 26), (54, 50, 54), (22, 23, 27))
+            self.line((x + 30, y + 20, x + 39, y + 20), (169, 154, 134))
 
-    def damage(self,e,amount,source=None,stats=None):
-        old = e.hp
-        super().damage(e,amount,source,stats)
-        if source:
-            self.record['robot_damage'] += max(0,min(old,old-e.hp))
+    def table(self, x, y, variant=0):
+        self.ellipse((x + 2, y + 18, x + 49, y + 27), (31, 23, 26))
+        self.ellipse((x, y, x + 50, y + 23), (117, 74, 55), (52, 38, 33))
+        self.ellipse((x + 4, y + 3, x + 45, y + 18), (135, 92, 64), (167, 118, 82))
+        if variant == 0:
+            self.rect((x + 21, y + 7, x + 28, y + 13), (214, 192, 154), (72, 59, 43))
+            self.rect((x + 23, y + 5, x + 26, y + 8), (229, 173, 88))
 
-    def tick_tutorial(self):
-        if not self.tutorial or self.tutorial_complete:
+    def armchair(self, x, y, variant=0):
+        c = (87, 45, 51) if variant == 0 else (55, 62, 82)
+        self.ellipse((x + 3, y + 22, x + 29, y + 34), (32, 25, 28))
+        self.stroke(x, y, 30, 24, c, (38, 27, 31))
+        self.rect((x + 5, y + 7, x + 25, y + 21), light(c, .05), shade(c, .70))
+        self.rect((x + 2, y + 2, x + 7, y + 19), shade(c, .85))
+        self.rect((x + 23, y + 2, x + 28, y + 19), shade(c, .85))
+        self.line((x + 8, y + 8, x + 22, y + 8), light(c, .13))
+
+    def fireplace(self, x, y):
+        self.stroke(x, y, 72, 34, (90, 65, 57), (40, 29, 31))
+        self.rect((x + 9, y + 4, x + 63, y + 28), (18, 15, 22), (138, 95, 64))
+        self.rect((x + 3, y, x + 68, y + 5), (132, 91, 64), (182, 131, 87))
+        self.rect((x + 11, y + 23, x + 60, y + 29), (59, 29, 23))
+        self.lights.append((x + 36, y + 18, 96, (244, 135, 64)))
+        self.particles.append(("flames", x + 30, y + 15))
+        for xx in (x + 20, x + 29, x + 40, x + 53):
+            self.polygon([(xx - 4, y + 26), (xx, y + 11 + self.rng.randrange(5)), (xx + 6, y + 26)], (234, 125, 52))
+            self.polygon([(xx - 2, y + 24), (xx, y + 16), (xx + 3, y + 24)], (252, 204, 102))
+
+    def clock(self, x, y, variant=0):
+        self.ellipse((x - 8, y - 7, x + 8, y + 8), (46, 33, 26), (140, 101, 68))
+        self.ellipse((x - 5, y - 5, x + 5, y + 5), (222, 201, 164), (83, 67, 49))
+        self.line((x, y, x + 3, y - 2), (36, 31, 28))
+        self.line((x, y, x, y - 4), (36, 31, 28))
+        for i in range(12):
+            a = i * 2 * math.pi / 12
+            xx = x + 4 * math.cos(a)
+            yy = y + 4 * math.sin(a)
+            self.d.point((int(xx), int(yy)), fill=(72, 52, 40))
+
+    def plant(self, x, y, variant=0):
+        self.ellipse((x - 9, y + 7, x + 10, y + 15), (42, 30, 26))
+        self.ellipse((x - 7, y + 4, x + 8, y + 12), (135, 79, 56), (78, 48, 38))
+        greens = [(45, 95, 65), (52, 113, 78), (75, 117, 69), (38, 80, 68)]
+        for i in range(9):
+            a = i * math.pi * .65 + variant
+            r = 8 + (i % 3) * 3
+            px = x + math.cos(a) * r
+            py = y + math.sin(a) * r * .65
+            self.line((x, y + 2, px, py), (34, 75, 57))
+            self.ellipse((px - 5, py - 3, px + 5, py + 4), greens[(i + variant) % 4], (32, 70, 52))
+        if variant == 2:
+            for i in range(3):
+                self.ellipse((x - 6 + i * 5, y - 6, x - 3 + i * 5, y - 2), (185, 122, 85))
+
+    def candle(self, x, y, variant=0):
+        self.ellipse((x - 4, y + 3, x + 5, y + 6), (126, 96, 56))
+        self.rect((x - 2, y - 5, x + 2, y + 4), (220, 201, 161), (131, 112, 86))
+        self.polygon([(x - 2, y - 7), (x + 1, y - 13), (x + 3, y - 6)], (255, 185, 75))
+        self.lights.append((x, y, 45, (245, 184, 96)))
+        self.particles.append(("candle", x, y - 11))
+
+    def painting(self, x, y, variant=0):
+        self.stroke(x, y, 30, 24, (131, 93, 53), (57, 45, 41))
+        self.rect((x + 4, y + 4, x + 26, y + 20), (31, 45, 60), (172, 131, 80))
+        self.ellipse((x + 12, y + 6, x + 18, y + 12), (179, 136, 103))
+        self.polygon([(x + 8, y + 19), (x + 11, y + 12), (x + 19, y + 12), (x + 22, y + 19)], (84, 59, 71))
+        if variant == 1:
+            self.rect((x + 11, y + 14, x + 20, y + 18), (51, 55, 79))
+
+    def pillow_piano(self, x, y, variant=0):
+        self.stroke(x, y, 78, 39, (27, 26, 35), (16, 18, 25))
+        self.polygon([(x + 7, y + 7), (x + 69, y + 7), (x + 58, y + 33), (x + 19, y + 33)], (41, 41, 53), (96, 74, 62))
+        self.rect((x + 8, y + 25, x + 65, y + 36), (215, 201, 168), (24, 25, 29))
+        for k in range(12):
+            self.line((x + 10 + k * 4, y + 26, x + 10 + k * 4, y + 34), (62, 56, 60))
+        for k in (1, 3, 6, 8, 10):
+            self.rect((x + 10 + k * 4, y + 26, x + 12 + k * 4, y + 30), (33, 33, 37))
+
+    def scattered_paper(self, x, y, variant=0):
+        self.polygon([(x - 7, y - 4), (x + 6, y - 5), (x + 8, y + 5), (x - 6, y + 6)], (215, 191, 153), (102, 79, 58))
+        for k in range(3):
+            self.line((x - 4, y - 1 + 2 * k, x + 4 - k, y - 1 + 2 * k), (132, 112, 88))
+        if variant:
+            self.rect((x + 2, y + 1, x + 6, y + 3), (136, 51, 51))
+
+    def bootprints(self, x, y):
+        for i in range(4):
+            xx = x + i * 6
+            yy = y + (i % 2) * 8
+            self.ellipse((xx - 3, yy - 5, xx + 2, yy + 2), (57, 46, 44))
+            self.ellipse((xx - 2, yy - 3, xx + 1, yy), (92, 77, 68))
+
+    def glass(self, x, y, variant=0):
+        for i in range(8):
+            a = i * 2.39 + variant
+            r = 5 + (i % 3) * 4
+            xx = x + r * math.cos(a)
+            yy = y + r * math.sin(a)
+            self.polygon([(xx - 2, yy + 3), (xx + 3, yy - 5), (xx + 5, yy + 2)], (96, 149, 153), (187, 220, 214))
+
+    def rope(self, x, y):
+        pts = []
+        for i in range(15):
+            pts.append((x - 14 + i * 2, y + math.sin(i * .57) * 4))
+        self.d.line(pts, fill=(159, 127, 77), width=3)
+        self.d.line(pts, fill=(221, 188, 129), width=1)
+
+    def crate(self, x, y, variant=0):
+        self.stroke(x, y, 30, 27, (117, 84, 59), (52, 38, 33))
+        self.rect((x + 3, y + 3, x + 26, y + 23), (130, 97, 65), (169, 129, 82))
+        self.line((x + 4, y + 4, x + 25, y + 22), (76, 54, 43), 2)
+        self.line((x + 4, y + 22, x + 25, y + 4), (76, 54, 43), 2)
+
+    def barrel(self, x, y):
+        self.ellipse((x - 9, y - 11, x + 10, y + 9), (78, 56, 42), (32, 31, 28))
+        self.ellipse((x - 7, y - 9, x + 8, y + 7), (112, 79, 57), (158, 124, 79))
+        self.line((x - 7, y, x + 8, y), (47, 52, 55))
+        self.line((x, y - 9, x, y + 7), (47, 52, 55))
+
+    def lantern(self, x, y):
+        self.ellipse((x - 6, y + 4, x + 6, y + 10), (34, 26, 29))
+        self.stroke(x - 3, y - 4, 7, 13, (234, 169, 73), (75, 65, 53))
+        self.line((x - 6, y - 6, x + 6, y - 6), (124, 98, 63))
+        self.lights.append((x, y, 63, (236, 161, 79)))
+        self.particles.append(("lamp", x, y))
+
+    def water(self, x, y, variant=0):
+        self.rect((x, y, x + 113, y + 38), (18, 48, 67), (40, 68, 82))
+        for i in range(12):
+            xx = x + 6 + i * 8
+            yy = y + 6 + (i * 5 + variant * 8) % 25
+            self.line((xx, yy, xx + 8, yy), (56, 97, 116))
+            self.d.point((xx + 2, yy - 1), (129, 145, 149))
+
+    def stage(self, x, y):
+        self.rect((x, y, x + 366, y + 107), (78, 30, 48), (157, 72, 83))
+        for xx in range(x, x + 363, 16):
+            self.line((xx, y + 7, xx + 4, y + 91), (107, 43, 58))
+        self.rect((x + 10, y + 100, x + 356, y + 106), (194, 125, 72))
+        for xx in range(x + 19, x + 352, 24):
+            self.ellipse((xx, y + 98, xx + 5, y + 103), (244, 202, 108))
+
+    def telescope(self, x, y):
+        self.ellipse((x - 12, y + 27, x + 26, y + 41), (31, 29, 37))
+        self.line((x + 7, y + 30, x + 31, y + 8), (103, 119, 131), 6)
+        self.line((x + 7, y + 30, x - 19, y + 15), (103, 119, 131), 6)
+        self.line((x + 6, y + 28, x + 6, y + 50), (129, 135, 142), 5)
+        self.polygon([(x - 33, y + 10), (x + 28, y - 10), (x + 35, y + 7), (x - 26, y + 26)], (55, 76, 88), (149, 154, 147))
+        self.line((x - 28, y + 10, x + 31, y - 6), (154, 163, 170), 2)
+        self.ellipse((x - 39, y + 8, x - 28, y + 24), (26, 38, 54), (144, 143, 146))
+
+    def portrait(self, x, y, variant=0):
+        self.stroke(x, y, 34, 30, (133, 92, 54), (65, 48, 42))
+        self.rect((x + 4, y + 4, x + 30, y + 26), (36, 46, 63), (188, 134, 76))
+        self.ellipse((x + 13, y + 7, x + 21, y + 16), (185, 145, 111))
+        self.polygon([(x + 7, y + 25), (x + 10, y + 17), (x + 23, y + 17), (x + 27, y + 25)], (88, 68, 76))
+        self.rect((x + 6, y + 26, x + 29, y + 28), (128, 96, 61))
+
+    def small_object(self, kind, x, y, variant=0):
+        # Keep item silhouettes crisp and recognizable. No text overlays.
+        if kind in {"paper", "letter", "note", "bill", "cue", "sketch", "inventory", "transcript", "starchart", "guestbook", "cargo", "tide", "record"}:
+            self.scattered_paper(x, y, variant)
+            if kind in {"starchart", "tide", "sketch"}:
+                self.line((x - 3, y + 2, x + 4, y - 3), (52, 79, 95))
+            if kind in {"bill", "inventory", "cargo"}:
+                self.rect((x + 3, y + 2, x + 6, y + 4), (120, 45, 46))
+        elif kind in {"clock", "bell"}:
+            self.clock(x, y, variant)
+        elif kind in {"footprints"}:
+            self.bootprints(x, y)
+        elif kind in {"key", "gear"}:
+            self.ellipse((x - 5, y - 5, x + 3, y + 3), (124, 119, 108), (198, 190, 146))
+            self.line((x + 3, y, x + 12, y + 4), (197, 174, 118), 2)
+            self.line((x + 8, y + 2, x + 9, y + 7), (197, 174, 118), 2)
+        elif kind in {"seal", "stamp", "moths"}:
+            self.ellipse((x - 7, y - 5, x + 7, y + 5), (145, 51, 57), (96, 41, 44))
+            self.polygon([(x, y - 4), (x - 5, y - 2), (x, y), (x + 5, y - 2)], (208, 189, 146))
+            self.polygon([(x, y), (x - 4, y + 4), (x, y + 2), (x + 4, y + 4)], (181, 165, 136))
+        elif kind in {"ticket", "film"}:
+            self.rect((x - 11, y - 6, x + 12, y + 5), (203, 175, 124), (114, 85, 61))
+            for k in range(3):
+                self.rect((x - 8 + k * 7, y - 3, x - 4 + k * 7, y + 2), (35, 34, 36))
+        elif kind in {"rope"}:
+            self.rope(x, y)
+        elif kind in {"glass"}:
+            self.glass(x, y, variant)
+        elif kind in {"velvet"}:
+            self.polygon([(x - 9, y - 3), (x + 2, y - 8), (x + 10, y + 4), (x - 3, y + 7)], (102, 30, 53), (160, 76, 82))
+        elif kind in {"burned"}:
+            self.scattered_paper(x, y, 1)
+            self.polygon([(x + 2, y - 5), (x + 8, y - 4), (x + 7, y + 3), (x + 4, y)], (54, 35, 30))
+        elif kind in {"passage"}:
+            self.rect((x - 10, y - 6, x + 8, y + 10), (22, 28, 37), (107, 84, 63))
+            self.line((x - 7, y + 7, x + 7, y - 2), (68, 60, 59))
+        else:
+            self.scattered_paper(x, y, variant)
+
+    def prop(self, p):
+        kind, x, y, variant = p
+        if kind in {"rug", "runner", "glassfloor", "stonefloor"}:
+            if kind == "rug":
+                self.small_rug(x, y, 300, 112)
+            elif kind == "runner":
+                self.small_rug(x, y, 285, 60)
+            elif kind == "glassfloor":
+                self.small_rug(x, y, 388, 173, (38, 83, 73))
+            elif kind == "stonefloor":
+                self.small_rug(x, y, 328, 179, (52, 48, 65))
+        elif kind in {"bookcase", "bookshelf"}:
+            self.bookcase(x, y, variant)
+        elif kind == "desk":
+            self.desk(x, y, variant)
+        elif kind == "table":
+            self.table(x, y, variant)
+        elif kind == "armchair":
+            self.armchair(x, y, variant)
+        elif kind == "fireplace":
+            self.fireplace(x, y)
+        elif kind == "plant":
+            self.plant(x, y, variant)
+        elif kind == "piano":
+            self.pillow_piano(x, y, variant)
+        elif kind in {"clock", "grandfather"}:
+            self.clock(x, y, variant)
+        elif kind == "candle":
+            self.candle(x, y, variant)
+        elif kind == "painting":
+            self.painting(x, y, variant)
+        elif kind == "portrait":
+            self.portrait(x, y, variant)
+        elif kind == "window":
+            self.window(x, y, 31, 26)
+        elif kind == "crate":
+            self.crate(x, y, variant)
+        elif kind == "barrel":
+            self.barrel(x, y)
+        elif kind == "lantern":
+            self.lantern(x, y)
+        elif kind == "lamp":
+            self.candle(x, y, variant)
+        elif kind == "glass":
+            self.glass(x, y, variant)
+        elif kind == "bench":
+            self.stroke(x, y, 48, 17, (112, 71, 49), (42, 30, 29))
+            self.rect((x + 4, y + 4, x + 43, y + 12), (143, 97, 61))
+        elif kind in {"wardrobe", "counter", "judgebench", "altar", "coffin"}:
+            w = {"wardrobe": 32, "counter": 76, "judgebench": 125, "altar": 74, "coffin": 76}[kind]
+            h = {"wardrobe": 43, "counter": 22, "judgebench": 47, "altar": 47, "coffin": 32}[kind]
+            color = (91, 61, 49) if kind != "coffin" else (58, 54, 62)
+            self.stroke(x, y, w, h, color, (37, 30, 28))
+            self.rect((x + 4, y + 4, x + w - 4, y + h - 4), light(color, .1), (140, 101, 69))
+            if kind == "coffin":
+                self.line((x + w // 2, y + 5, x + w // 2, y + h - 5), (185, 155, 99))
+        elif kind in {"suitcase"}:
+            self.stroke(x, y, 23, 18, (113, 79, 57), (40, 35, 31))
+            self.rect((x + 8, y - 4, x + 15, y + 1), (35, 33, 35), (165, 139, 89))
+        elif kind == "coatstand":
+            self.ellipse((x - 6, y + 21, x + 8, y + 29), (49, 42, 38))
+            self.line((x, y - 17, x, y + 25), (93, 68, 50), 3)
+            self.line((x - 10, y - 11, x + 10, y - 11), (93, 68, 50), 3)
+        elif kind == "pillar":
+            self.ellipse((x - 14, y - 4, x + 14, y + 7), (114, 106, 102), (60, 61, 70))
+            self.rect((x - 10, y + 3, x + 10, y + 23), (92, 93, 98), (49, 53, 59))
+        elif kind == "stage":
+            self.stage(x, y)
+        elif kind == "curtain":
+            for xx in range(x, x + 28, 4):
+                self.rect((xx, y, xx + 3, y + 102), (107, 35 + xx % 13, 57))
+        elif kind == "footlight":
+            self.candle(x, y, 0)
+        elif kind == "water":
+            self.water(x, y, variant)
+        elif kind == "dockfloor":
+            self.small_rug(x, y, 418, 183, (85, 69, 52))
+        elif kind == "telescope":
+            self.telescope(x, y)
+        elif kind == "scope":
+            self.stroke(x, y, 22, 20, (61, 76, 85), (37, 46, 54))
+        elif kind == "globe":
+            self.ellipse((x - 12, y - 12, x + 12, y + 12), (51, 91, 112), (160, 131, 83))
+            self.polygon([(x - 5, y - 9), (x + 4, y - 3), (x - 3, y + 8), (x - 10, y + 2)], (79, 110, 89))
+        elif kind == "statue":
+            self.stroke(x, y, 25, 30, (100, 100, 111), (52, 53, 65))
+            self.ellipse((x + 6, y - 11, x + 20, y + 5), (120, 120, 127))
+        else:
+            self.small_object(kind, x, y, variant)
+
+    def vignette(self):
+        # Fixed-radius subtle dark edges: pixel art first, atmosphere second.
+        overlay = Image.new("RGBA", self.image.size, (0, 0, 0, 0))
+        op = ImageDraw.Draw(overlay)
+        for n in range(16):
+            alpha = int(2.6 * (16 - n))
+            op.rectangle((n, n, WORLD_W - n - 1, WORLD_H - n - 1), outline=(6, 10, 20, alpha), width=1)
+        self.image = Image.alpha_composite(self.image.convert("RGBA"), overlay).convert("RGB")
+        self.d = ImageDraw.Draw(self.image)
+
+    def lighting(self):
+        # Warm light falls naturally across nearby floor tiles.
+        if not self.lights:
             return
-        checks = (
-            self.walk_distance>=2.3,
-            self.mined_metal>=16,
-            self.selected_once,
-            self.record['sites']>=1,
-            self.built_robots>=1,
-            self.opened_robot,
-            self.upgrades_completed>=1,
-            self.wave>=1,
-            self.wave>=1 and not self.active,
-        )
-        if checks[self.tutorial_step]:
-            self.tutorial_step += 1
-            self.fx('upgrade',self.player.pos,'#b4e7bd',.6,.75)
-            if self.tutorial_step>=len(TUTORIAL_STEPS):
-                self.tutorial_complete = True
-                self.tutorial = False
-                self.autoplay = True
-                self.notice('Tutorial complete','You can continue this level or return to the nine-level menu.','#efd596')
-            else:
-                title,description = TUTORIAL_STEPS[self.tutorial_step]
-                self.notice(title,description)
+        overlay = Image.new("RGBA", self.image.size, (0, 0, 0, 0))
+        d = ImageDraw.Draw(overlay)
+        for lx, ly, radius, color in self.lights:
+            for k in range(int(radius), 0, -7):
+                a = max(0, int((1 - k / radius) * 5))
+                d.ellipse((lx - k, ly - k * .62, lx + k, ly + k * .62), fill=(*color, a))
+        self.image = Image.alpha_composite(self.image.convert("RGBA"), overlay).convert("RGB")
+        self.d = ImageDraw.Draw(self.image)
 
-    def bug_attack(self,e,target):
-        super().bug_attack(e,target)
-        if not isinstance(target,Building):self.clean_wave=False
-        e.attack_clock=.62 if e.role in ('slash','crush','boss','ram') else .42
-        e.attack_length=e.attack_clock
+    def restricted_office(self):
+        # Pixel-snapped corridor architecture. No polygons cross the crop edge.
+        p = self.palette
+        x1, y1, x2, y2 = RESTRICTED_ZONE
+        self.rect((x1, y1, x2, y2), shade(p["floor"], .80))
+        self.rect((x1 + 6, y1 + 7, x2 - 6, y2 - 6), None, shade(p["trim"], .80))
+        lo, hi = OFFICE_DOOR
+        self.rect((x1 - 3, y1, x1 + 2, y2 + 2), p["wall"], p["trim"])
+        self.rect((x2 - 2, y1, x2 + 3, y2 + 2), p["wall"], p["trim"])
+        self.rect((x1, y1 - 3, x2, y1 + 2), p["wall"], p["trim"])
+        self.rect((x1, y2 - 3, lo, y2 + 3), p["wall"], p["trim"])
+        self.rect((hi, y2 - 3, x2, y2 + 3), p["wall"], p["trim"])
+        # The dark threshold is an opening, not a wall painted onto the floor.
+        self.rect((lo + 2, y2 - 2, hi - 2, y2 + 3), shade(p["floor"], .64), shade(p["trim"], .7))
+        self.rect((lo - 4, y2 - 6, lo - 1, y2 + 8), p["trim"])
+        self.rect((hi + 1, y2 - 6, hi + 4, y2 + 8), p["trim"])
+        # A small engraved brass notice, as part of the building rather than a HUD label.
+        self.rect((x1 + 44, y1 + 9, x1 + 102, y1 + 20), (65, 55, 45), (139, 111, 69))
+        self.line((x1 + 50, y1 + 14, x1 + 96, y1 + 14), (179, 145, 88))
+        for n in range(4):
+            xx = x1 + 8 + n * 33
+            self.rect((xx, y2 - 18, xx + 20, y2 - 16), shade(p["trim"], .7))
 
-    def move_enemies(self,dt):
-        before={id(e):e.pos for e in self.enemies}
-        super().move_enemies(dt)
-        for e in self.enemies:
-            previous=before.get(id(e),e.pos)
-            traveled=distance(previous,e.pos)
-            e.walk_phase=getattr(e,'walk_phase',0)+min(.3,traveled)*11
-            target=1. if traveled>.0005 and not e.stun else 0.
-            e.walk_blend=getattr(e,'walk_blend',0)+(target-getattr(e,'walk_blend',0))*min(1,dt*16)
-            e.attack_clock=max(0,getattr(e,'attack_clock',0)-dt)
-            if traveled>.8:
-                e.leap_clock=.5
-            else:
-                e.leap_clock=max(0,getattr(e,'leap_clock',0)-dt)
+    def render(self, level: Level):
+        self.floor()
+        self.boundary()
+        # Broad rugs are laid first; physical props go on top of them.
+        for prop in level.props:
+            if prop[0] in {"rug", "runner", "glassfloor", "stonefloor", "dockfloor", "water"}:
+                self.prop(prop)
+        for prop in level.props:
+            if prop[0] not in {"rug", "runner", "glassfloor", "stonefloor", "dockfloor", "water"}:
+                self.prop(prop)
+        # Re-draw clue items on top of furniture so they are visibly discoverable.
+        for j, item in enumerate(level.objects):
+            if not item.secret and item.id != "uniform":
+                self.small_object(item.kind, item.x, item.y, j)
+        # Dense hand-placed little visual details, instead of floating UI symbols.
+        for _ in range(115):
+            x = self.rng.randint(25, WORLD_W - 26)
+            y = self.rng.randint(45, WORLD_H - 25)
+            if self.rng.random() < .22:
+                self.d.point((x, y), fill=(154, 119, 87))
+        self.lighting()
+        self.vignette()
+        return self.image
 
-    def operate_buildings(self,dt):
-        previous={id(b):b.cooldown for b in self.buildings.values()}
-        super().operate_buildings(dt)
-        for b in self.buildings.values():
-            b.recoil_clock=max(0,getattr(b,'recoil_clock',0)-dt)
-            if b.animation>0 and b.cooldown>previous.get(id(b),b.cooldown)+.01:
-                b.recoil_clock=.34
-            age=.34-b.recoil_clock
-            strength=9 if b.role in ('sniper','rail','mortar','scatter') else 6
-            b.visual_recoil=strength*math.exp(-age*13)*math.sin(min(1,age/.045)*math.pi/2) if b.recoil_clock else 0.
+# -----------------------------------------------------------------------------
+# DIRECTIONAL CHARACTER ANIMATION
+# Characters are 24x32 low-resolution pixel figures, not Tk shapes pretending
+# to be sprites. Walks have independently phased legs, arms, coat tails, and a
+# subtle body bob. All four directions have distinct geometry.
+# -----------------------------------------------------------------------------
 
-    def update_field(self,dt,axis=(0,0),holding=False,sprint=False):
-        if self.outcome:return
-        self.move_player(dt,axis,sprint)
-        self.use_tool(dt,holding)
-        old_ids={id(e) for e in self.enemies}
-        was_active=self.active
-        self.autoplay=False
-        super().update(dt)
-        self.autoplay=True
-        for e in self.enemies:
-            if id(e) not in old_ids:
-                e.hp*=self.level.health_factor;e.maxhp*=self.level.health_factor
-        for key in list(self.orders):
-            if key not in self.buildings:
-                self.orders.pop(key)
-                self.notice('Site destroyed','Keep unfinished buildings behind your defenders.','#e7a58d')
-        if was_active and not self.active:
-            if self.outcome:
-                self.intermission=0
-            else:
-                self.intermission=self.break_after(self.wave)
-                self.break_duration=self.intermission
-                if self.clean_wave:
-                    bonus=40+self.wave*3;self.money+=bonus
-                    self.notice('Core untouched!',f'+${bonus} bonus','#f6da8e')
-                if self.wave%5==0:
-                    self.supply_pending=self.wave
-                    self.notice('Supply break','One minute. Visit the core and choose a supply pack.','#c6e3b3')
-                else:
-                    self.notice('Wave cleared','15 seconds to mine, build and repair.','#b8e3bb')
-        elif not self.active:
-            training_pause=self.tutorial and self.tutorial_step<7
-            if not training_pause:
-                self.intermission=max(0,self.intermission-dt)
-                if self.intermission<.000001:self.intermission=0
-                if self.intermission<=0:self.start_wave(automatic=True)
-        self.tick_tutorial()
-        for notice in self.feedback:notice['age']+=dt;notice['life']-=dt
-        self.feedback=[n for n in self.feedback if n['life']>0]
-        self.record['time']+=dt
+SKIN_SWATCHES = [
+    (199, 146, 116),
+    (231, 186, 146),
+    (163, 107, 78),
+    (112, 77, 66),
+]
+HAIR_SWATCHES = [
+    (63, 39, 33),
+    (136, 83, 46),
+    (35, 35, 43),
+    (188, 172, 143),
+]
+COAT_SWATCHES = [
+    (100, 70, 78),
+    (47, 75, 97),
+    (67, 88, 73),
+    (125, 93, 67),
+]
+ACCESSORY_COLORS = [
+    (218, 182, 101),
+    (180, 193, 202),
+    (163, 99, 112),
+    (95, 155, 148),
+]
 
 
+# HAND-CRAFTED 24x26 CHARACTER ART ATLAS
+# Each row is a raster line. These shapes are used on case cards,
+# inventory drawings, deduction threads and little in-world flourishes.
+# . transparent, o outline, p paper, g gold, b blue, r red, l green,
+# w steel, c leather, f skin. The pixels are embedded in the one .py file.
+ICON_RASTERS = {
+    'clock': (
+        '........................',
+        '........................',
+        '.........ccccc..........',
+        '.........ccccc..........',
+        '.........ccccco.........',
+        '.......oocccccooo.......',
+        '......ooooggggoooo......',
+        '.....ooogggcggggooo.....',
+        '....ooogcgoopcgggooo....',
+        '....oogggpoopppgggoo....',
+        '....ooggppooppppcgoo....',
+        '...oogcpppoopppppggoo...',
+        '...ooggpppoopppppggoo...',
+        '...oocgpppoopppppcgoo...',
+        '...ooggppppooopppggoo...',
+        '...ooggpppppppoooggoo...',
+        '....oocgppppppppogoo....',
+        '....oogggppppppgggoo....',
+        '....oooggcppppcggooo....',
+        '.....ooogggcggggooo.....',
+        '......ooooggggoooo......',
+        '.......oooooooooo.......',
+        '.........oooooo.........',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'footprints': (
+        '........................',
+        '.......p................',
+        '......ppppp.............',
+        '.......p.pp.............',
+        '......ooopp.............',
+        '.....orrco..............',
+        '....orrrrco.............',
+        '....orrrrco.............',
+        '....orrrrco.............',
+        '....ocrrcco......p......',
+        '....occccco.....ppp.....',
+        '.....occco.......p......',
+        '......ooo...............',
+        '.............ooo........',
+        '............occco.......',
+        '...........ocrrcco......',
+        '...........orrrrco......',
+        '...........orrrrco......',
+        '...........orrrrco......',
+        '...........ocrrcco......',
+        '............occco.......',
+        '.............ooo........',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'letter': (
+        '........................',
+        '........................',
+        '..................o.....',
+        '....ooooooooooooooo.....',
+        '....oopoooooooooooo.....',
+        '....ooppprppppppppo.....',
+        '....oopprrrpppppppoo....',
+        '....ooppprrrppppppoo....',
+        '.....oppccrrrcccppro....',
+        '.....oppppprrpppprrr....',
+        '.....opppppprrpprrro....',
+        '.....oppccccrrrcrrpo....',
+        '.....oppppppprrrrrpoo...',
+        '.....ooppppppprrrppoo...',
+        '.....oopcccccccrpppoo...',
+        '.....ooppppppppppppoo...',
+        '.....oopppppppppppppo...',
+        '.....oopccccccccppppo...',
+        '......opppppppppppppoo..',
+        '......opppppppppppppoo..',
+        '......opppppppoooooooo..',
+        '......opooooooooo.......',
+        '......oooooo............',
+        '......o.................',
+        '........................',
+        '........................',
+    ),
+    'ticket': (
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+        '.oooooooooooooooooooooo.',
+        '.oggggggggggggggggggggo.',
+        '.ogccccccccccccccccccgo.',
+        '.ogcppppppppppppppppcgo.',
+        '.ogcpppcccpcccpcccppcgo.',
+        '.oocpppcccpcccpcccppcoo.',
+        'oooopppcccpcccpcccppoooo',
+        'oooopppcccpcccpcccppoooo',
+        '.oocpppcccpcccpcccppcoo.',
+        '.ogcppppppppppppppppcgo.',
+        '.ogcppppppppppppppppcgo.',
+        '.ogccccccccccccccccccgo.',
+        '.oggggggggggggggggggggo.',
+        '.oooooooooooooooooooooo.',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'paper': (
+        '........................',
+        '........................',
+        '..................o.....',
+        '....ooooooooooooooo.....',
+        '....oopoooooooooooo.....',
+        '....ooppppppppppppo.....',
+        '....ooppppppppppppoo....',
+        '....ooppppppppppppoo....',
+        '.....oppccccccccppoo....',
+        '.....opppppppppppppo....',
+        '.....opppppppppppppo....',
+        '.....oppcccccccccppo....',
+        '.....opppppppppppppoo...',
+        '.....ooppppppppppppoo...',
+        '.....oopccccccccpppoo...',
+        '.....ooppppppppppppoo...',
+        '.....oopppppppppppppo...',
+        '.....oopccccccccppppo...',
+        '......opppppppppppppoo..',
+        '......opppppppppppppoo..',
+        '......opppppppoooooooo..',
+        '......opooooooooo.......',
+        '......oooooo............',
+        '......o.................',
+        '........................',
+        '........................',
+    ),
+    'ledger': (
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+        '..o...................o.',
+        '..ooooo..........oooooo.',
+        '..oooooooooggoooooooooo.',
+        '..oopooooooggooooooopoo.',
+        '..oopppooooggooooppppoo.',
+        '..ooppppppoggopppppppoo.',
+        '..oopccpppoggopppccccoo.',
+        '..oopppcccoggocccppppoo.',
+        '..ooppppppoggopppppppoo.',
+        '..oopccpppoggopppccccoo.',
+        '..oopppcccoggocccppppoo.',
+        '..oopppppppggopppppppoo.',
+        '..oopccppppggopppccccoo.',
+        '..oopppcccpggocccppppoo.',
+        '..oooooppppggoppppooooo.',
+        '..oooooooopggopoooooooo.',
+        '.......ooooggooooo......',
+        '...........gg...........',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'key': (
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+        '.....ooooo..............',
+        '....ooooooo.............',
+        '...ooogggooo............',
+        '..ooogggggooo...........',
+        '..oogggogggoo...........',
+        '..ooggoooggoo...........',
+        '..oogggogggoo...........',
+        '..ooogggggoog...........',
+        '...ooogggooogg..........',
+        '....ooooooggogg.........',
+        '.....ooooo.ggogg...g....',
+        '............ggogg.ggg...',
+        '.............ggogggggg..',
+        '..............ggggggg...',
+        '...............ggggg....',
+        '................ggggg...',
+        '.................ggogg..',
+        '..................ggogg.',
+        '...................ggo..',
+        '....................g...',
+        '........................',
+        '........................',
+    ),
+    'bill': (
+        '........................',
+        '........................',
+        '..................o.....',
+        '....ooooooooooooooo.....',
+        '....oopoooooooooooo.....',
+        '....ooppppppppppppo.....',
+        '....ooppppppppppppoo....',
+        '....ooppppppppppppoo....',
+        '.....oppccccccccppoo....',
+        '.....opppppppppppppo....',
+        '.....opppppppppppppo....',
+        '.....oppcccccccccppo....',
+        '.....opppppppppppppoo...',
+        '.....ooppppppppppppoo...',
+        '.....oopccccccccpppoo...',
+        '.....ooppppppppppppoo...',
+        '.....oopppppppppppppo...',
+        '.....oopccccccccppppo...',
+        '......oppppppppooooooo..',
+        '......opppppppporrrooo..',
+        '......opppppppoorrrooo..',
+        '......opoooooooooooo....',
+        '......oooooo............',
+        '......o.................',
+        '........................',
+        '........................',
+    ),
+    'bell': (
+        '........................',
+        '........................',
+        '..........cccc..........',
+        '..........cccc..........',
+        '..........cccc..........',
+        '..........cccc..........',
+        '........gggggggg........',
+        '........ggggggggg.......',
+        '.......gggggggggg.......',
+        '.......ggggggggggg......',
+        '......ggggggggggggg.....',
+        '......ggggggggggggg.....',
+        '......ggggggggggggg.....',
+        '......ggggggggggggg.....',
+        '......ggggggggggggg.....',
+        '......ggggggggggggg.....',
+        '......ggggggggggggg.....',
+        '.....ggggggggggggggg....',
+        '...ggggggggooogggggggg..',
+        '....ooooooocccooooooo...',
+        '....ooooooocccooooooo...',
+        '..........occco.........',
+        '...........ooo..........',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'cue': (
+        '........................',
+        '........................',
+        '..................o.....',
+        '....ooooooooooooooo.....',
+        '....oopoooooooooooo.....',
+        '....ooppppppppppppo.....',
+        '....oopppppppppprpoo....',
+        '....ooppppppppprrroo....',
+        '.....oppcccccccrrpoo....',
+        '.....opppppppprrrppo....',
+        '.....oppppppprrrpppo....',
+        '.....oppcccccrrccppo....',
+        '.....opppppprrrppppoo...',
+        '.....ooppppprrpppppoo...',
+        '.....oopcccrrrccpppoo...',
+        '.....ooppprrrppppppoo...',
+        '.....ooppprrppppppppo...',
+        '.....oopcrrrccccppppo...',
+        '......oppprpppppppppoo..',
+        '......opppppppppppppoo..',
+        '......opppppppoooooooo..',
+        '......opooooooooo.......',
+        '......oooooo............',
+        '......o.................',
+        '........................',
+        '........................',
+    ),
+    'velvet': (
+        '........................',
+        '........................',
+        '........................',
+        '....oo.............oo...',
+        '....orooo.......oooro...',
+        '...orrrrrooooooorrrrro..',
+        '...orrrrrrppppprrrrrro..',
+        '..orrrrrrrppppprrrrrrro.',
+        '..orrrrrrrppppprrrrrrro.',
+        '.orrrrrrrrrppprrrrrrrrro',
+        '.oorrrrrrrrppprrrrrrrroo',
+        '...oorrrrrrppprrrrrroo..',
+        '.....ocrrrrppprrrcoo....',
+        '......crrrrrprrrrco.....',
+        '......crrrrrprrrrco.....',
+        '......crrrrrprrrrco.....',
+        '......crrrrrrrrrrco.....',
+        '......crrrrrrrrrrco.....',
+        '......crrrrrrrrrrcro....',
+        '.....ocrrrrrrrrrrcro....',
+        '.....ocrrrrrrrrrrcro....',
+        '.....ocrrrrrrrrrrcro....',
+        '.....orrrrrrrrrrrrro....',
+        '.....orrrrrrrrrrrrro....',
+        '.....ooooooooooooooo....',
+        '........................',
+    ),
+    'film': (
+        '........................',
+        '........................',
+        '........................',
+        '...gggggggggggggggggg...',
+        '...goooooooooooooooog...',
+        '...goooooooooooooooog...',
+        '...gppoobbbbbbbbboppg...',
+        '...gppoobbbbbbbbboppg...',
+        '...goooobbbgggbbbooog...',
+        '...goooobbgggggbbooog...',
+        '...gppoobgggggggboppg...',
+        '...gppoobgggggggboppg...',
+        '...goooobgggggggbooog...',
+        '...goooobgggggggbooog...',
+        '...gppoobbgggggbboppg...',
+        '...gppoobbbgggbbboppg...',
+        '...goooobbbbbbbbbooog...',
+        '...goooobbbbbbbbbooog...',
+        '...gppoobbbbbbbbboppg...',
+        '...gppoobbbbbbbbboppg...',
+        '...goooooooooooooooog...',
+        '...goooooooooooooooog...',
+        '...gggggggggggggggggg...',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'burned': (
+        '........................',
+        '.......................r',
+        '.....oooo............rrr',
+        '.....opppoooooooo...rrrr',
+        '.....oppppppppppporrrrrr',
+        '.....opppppppppppprrrrrr',
+        '.....oppppppppppppprrrrr',
+        '.....occcccccccrppprrrr.',
+        '.....oppppppppprrrpprrr.',
+        '.....opppppppppprrrrrrr.',
+        '.....opppppppppprrrrrrr.',
+        '.....occcccccccpprrrrrr.',
+        '....opppppppppppprrrrrr.',
+        '....oppppppppppppprrrrr.',
+        '....opcccccccccppprrrrr.',
+        '....opppppppppppprrrrrr.',
+        '....opppppppppppprrrrrr.',
+        '....oppppppppppprrrrrrr.',
+        '....oppppppppppprrrrrr..',
+        '....opppppppppprrrrrrr..',
+        '....ooooooooppprrrrrrr..',
+        '............oorrrrrrrr..',
+        '..................rrrr..',
+        '.....................r..',
+        '........................',
+        '........................',
+    ),
+    'seal': (
+        '........................',
+        '........................',
+        '........................',
+        '..........ooooo.........',
+        '........oorrrrroo.......',
+        '......oorrrrrrrrroo.....',
+        '.....orrrrgggggrrrro....',
+        '.....orrrgggrgggrrro....',
+        '....orrrgggrrrrggrrro...',
+        '....orrgggrrrrrrrgrro...',
+        '...orrggrrrrrrrrrrrrro..',
+        '...orrgrrrrrrrrrrggrro..',
+        '...orrgggggrrrrggggrro..',
+        '...orrggggrrrrrggggrro..',
+        '...orrggggrrrrrrgggrro..',
+        '....orrggrrrrrrrggrro...',
+        '....orrrgrrgggrrrrrro...',
+        '.....orrrgggggggrrro....',
+        '.....orrrrgggggrrrro....',
+        '......oorrrrrrrrroo.....',
+        '........oorrrrroo.......',
+        '..........ooooo.........',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'sketch': (
+        '........................',
+        '........................',
+        '..................o.....',
+        '....ooooooooooooooo.....',
+        '....oopoooooooooooo.....',
+        '....ooppppppppppppo.....',
+        '....ooppppppppppppoo....',
+        '....ooppppppppppppoo....',
+        '.....oppcccccbbbppoo....',
+        '.....oppppppbbbbpppo....',
+        '.....oppppppbbpbbppo....',
+        '.....oppcccbbbcbbppo....',
+        '.....oppppbbbppbbppoo...',
+        '.....oopppbbppppbbpoo...',
+        '.....oopcbbbccccbbpoo...',
+        '.....oopbbbpppppbbpoo...',
+        '.....oopbbpppppppbbpo...',
+        '.....oobbbccccccpbbpo...',
+        '......opbpppppppppppoo..',
+        '......opppppppppppppoo..',
+        '......opppppppoooooooo..',
+        '......opooooooooo.......',
+        '......oooooo............',
+        '......o.................',
+        '........................',
+        '........................',
+    ),
+    'glass': (
+        '........................',
+        '........................',
+        '........w..........www..',
+        '.......ww......wwwwbbw..',
+        '......wbbw..wwwbbbbbw...',
+        '......wbbw..wbbbbbbbw...',
+        '.....wbbbbw..wbbbbbw....',
+        '....wbbbbbw..wbbbbbw....',
+        '...wwbbbbbbw..wbbbw.....',
+        '.....wwwbbbw..wbbbw.....',
+        '........wwwbw..wbw......',
+        '...........ww..wbw......',
+        '................w.......',
+        '.....bbbbbbb....w...bb..',
+        '.....bwwwwwb.....bbbwb..',
+        '......bwwwb....bbwwwwb..',
+        '......bwwwb..bbwwwwwb...',
+        '......bwwwb...bwwwwwb...',
+        '.......bwb.....bwwwwb...',
+        '.......bwb......bwwwb...',
+        '.......bwb......bwwwb...',
+        '........b........bwb....',
+        '........b.........bb....',
+        '...................b....',
+        '........................',
+        '........................',
+    ),
+    'inventory': (
+        '........................',
+        '........................',
+        '..................o.....',
+        '....ooooooooooooooo.....',
+        '....oopoooooooooooo.....',
+        '....ooppppppppppppo.....',
+        '....ooppppppppppppoo....',
+        '....ooppppppppppppoo....',
+        '.....oppccccccccppoo....',
+        '.....opppppppppppppo....',
+        '.....opppppppppppppo....',
+        '.....oppcccccccccppo....',
+        '.....opppppppppppppoo...',
+        '.....ooppppppppppppoo...',
+        '.....oopccccccccpppoo...',
+        '.....ooppppppppppppoo...',
+        '.....oopppppppppppppo...',
+        '.....oopccccccccppppo...',
+        '......oppppppppooooooo..',
+        '......opppppppporrrooo..',
+        '......opppppppoorrrooo..',
+        '......opoooooooooooo....',
+        '......oooooo............',
+        '......o.................',
+        '........................',
+        '........................',
+    ),
+    'note': (
+        '........................',
+        '........................',
+        '..................o.....',
+        '....ooooooooooooooo.....',
+        '....oopoooooooooooo.....',
+        '....ooppppppppppppo.....',
+        '....ooppppppppppppoo....',
+        '....ooppppppppppppoo....',
+        '.....oppccccccccppoo....',
+        '.....opppppppppppppo....',
+        '.....opppppppppppppo....',
+        '.....oppcccccccccppo....',
+        '.....opppppppppppppoo...',
+        '.....ooppppppppppppoo...',
+        '.....oopccccccccpppoo...',
+        '.....ooppppppppppppoo...',
+        '.....oopppppppppppppo...',
+        '.....oopccccccccppppo...',
+        '......opppppppppppppoo..',
+        '......opppppppppppppoo..',
+        '......opppppppoooooooo..',
+        '......opooooooooo.......',
+        '......oooooo............',
+        '......o.................',
+        '........................',
+        '........................',
+    ),
+    'tide': (
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+        '.....b.......b........b.',
+        '...bbbbb...bbbbb....bbb.',
+        '.bbbwwbbbbbbwwbbbbbbbww.',
+        '.bww..wwbbww..wwbbbww...',
+        '.w......ww......www.....',
+        '........................',
+        '.....b.......b........b.',
+        '...bbbbb...bbbbb....bbb.',
+        '.bbbwwbbbbbbwwbbbbbbbww.',
+        '.bww..wwbbww..wwbbbww...',
+        '.w......ww......www.....',
+        '........................',
+        '.....b.......b........b.',
+        '...bbbbb...bbbbb....bbb.',
+        '.bbbwwbbbbbbwwbbbbbbbww.',
+        '.bww..wwbbww..wwbbbww...',
+        '.w......ww......www.....',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'rope': (
+        '........................',
+        '........................',
+        '........................',
+        '...cgc..cgc..cgc..cgc...',
+        '...cgc..cgc..cgc..cgc...',
+        '..cgc..cgc..cgc..cgc....',
+        '..cgc..cgc..cgc..cgc....',
+        '.cgc..cgc..cgc..cgc.....',
+        '.cgcc.cgcc.cgcc.cgcc....',
+        '.ccgc.ccgc.ccgc.ccgc....',
+        '..ccgc.ccgc.ccgc.ccgc...',
+        '...cgcc.cgcc.cgcc.cgcc..',
+        '...ccgc.ccgc.ccgc.ccgc..',
+        '....cgc..cgc..cgc..cgc..',
+        '...cgc..cgc..cgc..cgc...',
+        '...cgc..cgc..cgc..cgc...',
+        '..cgc..cgc..cgc..cgc....',
+        '..cgc..cgc..cgc..cgc....',
+        '.cgc..cgc..cgc..cgc.....',
+        '.cgcc.cgcc.cgcc.cgcc....',
+        '.ccgccccgccccgccccgccc..',
+        '..ccggcccggcccggcccggcc.',
+        '....ccg..ccg..ccg..ccg..',
+        '.....c....c....c....c...',
+        '........................',
+        '........................',
+    ),
+    'cargo': (
+        '........................',
+        '........................',
+        '..................o.....',
+        '....ooooooooooooooo.....',
+        '....oopoooooooooooo.....',
+        '....ooppppppppppppo.....',
+        '....ooppppppppppppoo....',
+        '....ooppppppppppppoo....',
+        '.....oppccccccccppoo....',
+        '.....opppppppppppppo....',
+        '.....opppppppppppppo....',
+        '.....oppcccccccccppo....',
+        '.....opppppppppppppoo...',
+        '.....ooppppppppppppoo...',
+        '.....oopccccccccpppoo...',
+        '.....ooppppppppppppoo...',
+        '.....oopppppppppppppo...',
+        '.....oopccccccccppppo...',
+        '......oppppppppooooooo..',
+        '......opppppppporrrooo..',
+        '......opppppppoorrrooo..',
+        '......opoooooooooooo....',
+        '......oooooo............',
+        '......o.................',
+        '........................',
+        '........................',
+    ),
+    'starchart': (
+        '........................',
+        '........................',
+        '..................o.....',
+        '....ooooooooooooooo.....',
+        '....oopoooooooooooo.....',
+        '....ooppppppppppppo.....',
+        '....ooppppppppppppoo....',
+        '....ooppppppppppppoo....',
+        '.....oppcccccbbbppoo....',
+        '.....oppppppbbbbpppo....',
+        '.....oppppppbbpbbppo....',
+        '.....oppcccbbbcbbppo....',
+        '.....oppppbbbppbbppoo...',
+        '.....oopppbbppppbbpoo...',
+        '.....oopcbbbccccbbpoo...',
+        '.....oopbbbpppppbbpoo...',
+        '.....oopbbpppppppbbpo...',
+        '.....oobbbccccccpbbpo...',
+        '......opbpppppppppppoo..',
+        '......opppppppppppppoo..',
+        '......opppppppoooooooo..',
+        '......opooooooooo.......',
+        '......oooooo............',
+        '......o.................',
+        '........................',
+        '........................',
+    ),
+    'gear': (
+        '........................',
+        '...........ooo..........',
+        '...........owo..........',
+        '...........ooo..........',
+        '....oooooo..............',
+        '....owooooooooo.........',
+        '...oooogooooooooo.......',
+        '..oooggooowwwwwooo......',
+        '..ooggooowwwwwwwooo.....',
+        '..ooggoowwwwwwwwwoo.....',
+        '..oogoowwwwooowwwwoo....',
+        '.oooooowwwooooowwwoo..oo',
+        '.owoooowwwooooowwwoo..ow',
+        '.oooooowwwooooowwwoo..oo',
+        '.....oowwwwooowwwwoo....',
+        '......oowwwwwwwwwoogg...',
+        '......ooowwwwwwwoooggg..',
+        '.......ooowwwwwoooggg...',
+        '........ooooooooogooo...',
+        '..........ooooo.ggowo...',
+        '.................gooog..',
+        '..................ggogg.',
+        '...........ooo.....ggo..',
+        '...........owo......g...',
+        '...........ooo..........',
+        '........................',
+    ),
+    'guestbook': (
+        '........................',
+        '........................',
+        '..................o.....',
+        '....ooooooooooooooo.....',
+        '....oopoooooooooooo.....',
+        '....ooppppppppppppo.....',
+        '....ooppppppppppppoo....',
+        '....ooppppppppppppoo....',
+        '.....oppccccccccppoo....',
+        '.....opppppppppppppo....',
+        '.....opppppppppppppo....',
+        '.....oppcccccccccppo....',
+        '.....opppppppppppppoo...',
+        '.....ooppppppppppppoo...',
+        '.....oopccccccccpppoo...',
+        '.....ooppppppppppppoo...',
+        '.....oopppppppppppppo...',
+        '.....oopccccccccppppo...',
+        '......opppppppppppppoo..',
+        '......opppppppppppppoo..',
+        '......opppppppoooooooo..',
+        '......opooooooooo.......',
+        '......oooooo............',
+        '......o.................',
+        '........................',
+        '........................',
+    ),
+    'transcript': (
+        '........................',
+        '........................',
+        '..................o.....',
+        '....ooooooooooooooo.....',
+        '....oopoooooooooooo.....',
+        '....ooppppppppppppo.....',
+        '....ooppppppppppppoo....',
+        '....ooppppppppppppoo....',
+        '.....oppccccccccppoo....',
+        '.....opppppppppppppo....',
+        '.....opppppppppppppo....',
+        '.....oppcccccccccppo....',
+        '.....opppppppppppppoo...',
+        '.....ooppppppppppppoo...',
+        '.....oopccccccccpppoo...',
+        '.....ooppppppppppppoo...',
+        '.....oopppppppppppppo...',
+        '.....oopccccccccppppo...',
+        '......opppppppppppppoo..',
+        '......oggggggggpppppoo..',
+        '......oggggggggooooooo..',
+        '......oggggggggoo.......',
+        '......oooooo............',
+        '......o.................',
+        '........................',
+        '........................',
+    ),
+    'stamp': (
+        '........................',
+        '........................',
+        '........................',
+        '..........ooooo.........',
+        '........oorrrrroo.......',
+        '......oorrrrrrrrroo.....',
+        '.....orrrrgggggrrrro....',
+        '.....orrrgggrgggrrro....',
+        '....orrrgggrrrrggrrro...',
+        '....orrgggrrrrrrrgrro...',
+        '...orrggrrrrrrrrrrrrro..',
+        '...orrgrrrrrrrrrrggrro..',
+        '...orrgggggrrrrggggrro..',
+        '...orrggggrrrrrggggrro..',
+        '...orrggggrrrrrrgggrro..',
+        '....orrggrrrrrrrggrro...',
+        '....orrrgrrgggrrrrrro...',
+        '.....orrrgggggggrrro....',
+        '.....orrrrgggggrrrro....',
+        '......oorrrrrrrrroo.....',
+        '........oorrrrroo.......',
+        '..........ooooo.........',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'passage': (
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+        '....ooooooooooooooooo...',
+        '....occccccccccccccco...',
+        '....occccccccccccccco...',
+        '....occgggggggggggcco...',
+        '....occgooooooooogcco...',
+        '....occgooooooooogcco...',
+        '....occgooooooooogcco...',
+        '....occgooooooooogcco...',
+        '....occgooooggooogcco...',
+        '....occgoooggggoogcco...',
+        '....occgoooggggoogcco...',
+        '....occgooooggooogcco...',
+        '....occgooooggooogcco...',
+        '....occgooooggooogcco...',
+        '....occgooooggooogcco...',
+        '....occgooooooooogcco...',
+        '....occgggggggggggcco...',
+        '....occccccccccccccco...',
+        '....occccccccccccccco...',
+        '....ooooooooooooooooo...',
+        '........................',
+        '........................',
+    ),
+    'moths': (
+        '........................',
+        '........................',
+        '........................',
+        '.....o...w.....w...o....',
+        '....ogo..w.....w..ogo...',
+        '...ogggo..w...w..ogggo..',
+        '...oggggo.w...w.oggggo..',
+        '..oggggggow...woggggggo.',
+        '..ogggggggowowogggggggo.',
+        '...ogggggggwowgggggggo..',
+        '...oggggggggoogggggggo..',
+        '...oggggggggoogggggggo..',
+        '....ogggggggooggggggo...',
+        '....ooooggoooooggoooo...',
+        '......oooogooogoooo.....',
+        '....oogggggooogggggoo...',
+        '....ogggggggooggggggo...',
+        '.....oggggggoogggggo....',
+        '.....ogggggooogggggo....',
+        '......ogggo.ooogggo.....',
+        '......oggo..oo.oggo.....',
+        '.......oo.......oo......',
+        '.......o.........o......',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'portrait': (
+        '........................',
+        '........................',
+        '..ooooooooooooooooooooo.',
+        '..ogggggggggggggggggggo.',
+        '..ogggggggggggggggggggo.',
+        '..oggcccccccccccccccggo.',
+        '..oggcbbbbbbbbbbbbbcggo.',
+        '..oggcbbbbbooobbbbbcggo.',
+        '..oggcbbbbofffobbbbcggo.',
+        '..oggcbbbofffffobbbcggo.',
+        '..oggcbbbofffffobbbcggo.',
+        '..oggcbbbofffffobbbcggo.',
+        '..oggcbbbbofffobbbbcggo.',
+        '..oggcbbbbbooobbbbbcggo.',
+        '..oggcbbooooooooobbcggo.',
+        '..oggcbborrrrrrrobbcggo.',
+        '..oggcborrrrrrrrrobcggo.',
+        '..oggcborrrrrrrrrobcggo.',
+        '..oggcorrrrrrrrrrrocggo.',
+        '..oggcorrrrrrrrrrrocggo.',
+        '..oggorrrrrrrrrrrrroggo.',
+        '..oggoooooooooooooooggo.',
+        '..ogggggggggggggggggggo.',
+        '..ogggggggggggggggggggo.',
+        '..ooooooooooooooooooooo.',
+        '........................',
+    ),
+    'record': (
+        '........................',
+        '........................',
+        '..................o.....',
+        '....ooooooooooooooo.....',
+        '....oopoooooooooooo.....',
+        '....ooppppppppppppo.....',
+        '....ooppppppppppppoo....',
+        '....ooppppppppppppoo....',
+        '.....oppccccgggcppoo....',
+        '.....opppppgooogpppo....',
+        '.....opppppgooogpppo....',
+        '.....oppcccgooogcppo....',
+        '.....opppppgooogpppoo...',
+        '.....oopppppgggppppoo...',
+        '.....oopccccccccpppoo...',
+        '.....ooppppppppppppoo...',
+        '.....oopppppppppppppo...',
+        '.....oopccccccccppppo...',
+        '......opppppppppppppoo..',
+        '......opppppppppppppoo..',
+        '......opppppppoooooooo..',
+        '......opooooooooo.......',
+        '......oooooo............',
+        '......o.................',
+        '........................',
+        '........................',
+    ),
+    'lock': (
+        '........................',
+        '........................',
+        '...........ooo..........',
+        '.........ooooooo........',
+        '....ooooooooooooooooo...',
+        '....occcooowwwoooccco...',
+        '....occooowwwwwooocco...',
+        '....occooowwwwwooocco...',
+        '....occooowwwwwooocco...',
+        '....occooowwwwwooocco...',
+        '....occooowwwwwooocco...',
+        '....occgooowwwooogcco...',
+        '....ooooooooooooooooo...',
+        '....oogggggggggggggoo...',
+        '....oogggggggggggggoo...',
+        '....oogggggggggggggoo...',
+        '....oogggggggggggggoo...',
+        '....oogggggggggggggoo...',
+        '....oogggggggggggggoo...',
+        '....oogggggggggggggoo...',
+        '....oogggggggggggggoo...',
+        '....ooooooooooooooooo...',
+        '....occccccccccccccco...',
+        '....ooooooooooooooooo...',
+        '........................',
+        '........................',
+    ),
+    'mask': (
+        '........................',
+        '........................',
+        '........................',
+        '...ooooooooooooooooooo..',
+        '...opppppppppppppppppo..',
+        '...opppppppppppppppppo..',
+        '...opppppppppppppppppo..',
+        '...opppppppppppppppppo..',
+        '...opppooooppppooooppo..',
+        '...oppooooooppoooooopo..',
+        '...oppooooooppoooooopo..',
+        '...oppooooooppoooooopo..',
+        '...opppooooppppooooppo..',
+        '...opppppppppppppppppo..',
+        '...opppppppppppppppppo..',
+        '...opppppppppppprppppo..',
+        '....opppprppppprrrppo...',
+        '....oppprrrppprrrppo....',
+        '.....oppprrrrrrppppo....',
+        '......opppprrrppppo.....',
+        '.......opppprppppo......',
+        '.......oppppppppo.......',
+        '........opppppppo.......',
+        '.........ooooooo........',
+        '........................',
+        '........................',
+    ),
+    'lantern': (
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+        '.........ccccccc........',
+        '.........ccccccc........',
+        '...........ggg..........',
+        '.......ooooggggooo......',
+        '.......ogggggggggo......',
+        '.......ogggggggggo......',
+        '.......ogpppgggpgo......',
+        '.......ogppppgppgo......',
+        '.......ogpppppppgo......',
+        '.......ogpppppppgo......',
+        '.......ogpppppppgo......',
+        '.......ogpppppppgo......',
+        '.......ogpppppppgo......',
+        '.......ogpppppppgo......',
+        '.......ogpppppppgo......',
+        '.......ogggggggggo......',
+        '.......ogggggggggo......',
+        '.......ooooooooooo......',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'eye': (
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+        '...........ooo..........',
+        '.......oooopppoooo......',
+        '.....oopppppppppppoo....',
+        '....oppppppbbbppppppo...',
+        '....opppppbbbbbpppppo...',
+        '...opppppbbbbbbbpppppo..',
+        '..opppppbbbboobbbpppppo.',
+        '..opppppbbboooobbpppppo.',
+        '.oppppppbbboooobbppppppo',
+        '..opppppbbbboobbbpppppo.',
+        '...opppppbbbbbbbpppppo..',
+        '...oppppppbbbbbppppppo..',
+        '....oppppppbbbppppppo...',
+        '.....oopppppppppppoo....',
+        '.......oooopppoooo......',
+        '...........ooo..........',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'watch': (
+        '........................',
+        '........................',
+        '.........ccccc..........',
+        '.........ccccc..........',
+        '.........ccccco.........',
+        '.......oocccccooo.......',
+        '......ooooggggoooo......',
+        '.....ooogggcggggooo.....',
+        '....ooogcgoopcgggooo....',
+        '....oogggpoopppgggoo....',
+        '....ooggppooppppcgoo....',
+        '...oogcpppoopppppggoo...',
+        '...ooggpppoopppppggoo...',
+        '...oocgpppoopppppcgoo...',
+        '...ooggppppooopppggoo...',
+        '...ooggpppppppoooggoo...',
+        '....oocgppppppppogoo....',
+        '....oogggppppppgggoo....',
+        '....oooggcppppcggooo....',
+        '.....ooogggcggggooo.....',
+        '......ooooggggoooo......',
+        '.......oooooooooo.......',
+        '.........oooooo.........',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'crowd': (
+        '........................',
+        '........................',
+        '........................',
+        '.....oooo...............',
+        '....offffo....oooo......',
+        '...offffffo..offffo.....',
+        '...offffffo.offffffo....',
+        '...offffffo.offffffo....',
+        '....offffooooofffffo....',
+        '.....oooooffffofffo.....',
+        '.ooooooooffffffooo......',
+        '.obbbbbboffffffoooooooo.',
+        '.obbbbbboffffffobbbbbbo.',
+        '.obbbbbbboffffobbbbbbbo.',
+        '.obbbbbbbboooobbbbbbbbo.',
+        '.obbbbooooooooooooobbbo.',
+        '.obbbbobbbbbbbbbbbobbbo.',
+        'obbbbbobbbbbbbbbbbobbbo.',
+        'obbbbbobbbbbbbbbbbobbbbo',
+        'obbbbbobbbbbbbbbbbobbbbo',
+        'obbbbbobbbbbbbbbbbobbbbo',
+        'obbbbbobbbbbbbbbbbobbbbo',
+        'obbbbobbbbbbbbbbbbbobbbo',
+        'oooooobbbbbbbbbbbbbobbbo',
+        '.....obbbbbbbbbbbbbooooo',
+        '.....obbbbbbbbbbbbbo....',
+    ),
+    'coat': (
+        '........................',
+        '........................',
+        '........................',
+        '....oo.............oo...',
+        '....orooo.......oooro...',
+        '...orrrrrooooooorrrrro..',
+        '...orrrrrrppppprrrrrro..',
+        '..orrrrrrrppppprrrrrrro.',
+        '..orrrrrrrppppprrrrrrro.',
+        '.orrrrrrrrrppprrrrrrrrro',
+        '.oorrrrrrrrppprrrrrrrroo',
+        '...oorrrrrrppprrrrrroo..',
+        '.....ocrrrrppprrrcoo....',
+        '......crrrrrprrrrco.....',
+        '......crrrrrprrrrco.....',
+        '......crrrrrprrrrco.....',
+        '......crrrrrrrrrrco.....',
+        '......crrrrrrrrrrco.....',
+        '......crrrrrrrrrrcro....',
+        '.....ocrrrrrrrrrrcro....',
+        '.....ocrrrrrrrrrrcro....',
+        '.....ocrrrrrrrrrrcro....',
+        '.....orrrrrrrrrrrrro....',
+        '.....orrrrrrrrrrrrro....',
+        '.....ooooooooooooooo....',
+        '........................',
+    ),
+    'archive': (
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+        '..o...................o.',
+        '..ooooo..........oooooo.',
+        '..oooooooooggoooooooooo.',
+        '..oopooooooggooooooopoo.',
+        '..oopppooooggooooppppoo.',
+        '..ooppppppoggopppppppoo.',
+        '..oopccpppoggopppccccoo.',
+        '..oopppcccoggocccppppoo.',
+        '..ooppppppoggopppppppoo.',
+        '..oopccpppoggopppccccoo.',
+        '..oopppcccoggocccppppoo.',
+        '..oopppppppggopppppppoo.',
+        '..oopccppppggopppccccoo.',
+        '..oopppcccpggocccppppoo.',
+        '..oooooppppggoppppooooo.',
+        '..oooooooopggopoooooooo.',
+        '.......ooooggooooo......',
+        '...........gg...........',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'keyring': (
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+        '.....ooooo..............',
+        '....ooooooo.............',
+        '...ooogggooo............',
+        '..ooogggggooo...........',
+        '..oogggogggoo...........',
+        '..ooggoooggoo...........',
+        '..oogggogggoo...........',
+        '..ooogggggoog...........',
+        '...ooogggooogg..........',
+        '....ooooooggogg.........',
+        '.....ooooo.ggogg...g....',
+        '............ggogg.ggg...',
+        '.............ggogggggg..',
+        '..............ggggggg...',
+        '...............ggggg....',
+        '................ggggg...',
+        '.................ggogg..',
+        '..................ggogg.',
+        '...................ggo..',
+        '....................g...',
+        '........................',
+        '........................',
+    ),
+    'knife': (
+        '........................',
+        '........................',
+        '....................o...',
+        '...................owo..',
+        '..................owwwo.',
+        '.................owwwo..',
+        '.................owwwo..',
+        '................owwwo...',
+        '...............owwwwo...',
+        '..............owwwwo....',
+        '.............owwwwo.....',
+        '............owwwwwo.....',
+        '............owwwwo......',
+        '...........owwwwo.......',
+        '.........cowwwwwo.......',
+        '........cccwwwwo........',
+        '.......ccccwwwwo........',
+        '......ccccccwwo.........',
+        '....cccccccwwo..........',
+        '...cccccccwwo...........',
+        '..cccccccwwo............',
+        '.ccccccwwwo.............',
+        '..ccccowwo..............',
+        '..ccc..oo...............',
+        '...c....................',
+        '........................',
+    ),
+    'moon': (
+        '........................',
+        '........................',
+        '........................',
+        '..........oo............',
+        '........oogg............',
+        '......ooggg.............',
+        '.....oggggg.............',
+        '.....ogggg..............',
+        '....oggggg..............',
+        '....oggggg..............',
+        '...ogggggg..............',
+        '...ogggggg..............',
+        '...oggggggg.............',
+        '...oggggggg.............',
+        '...ogggggggg............',
+        '....oggggggg............',
+        '....ogggggggg...........',
+        '.....oggggggggg.........',
+        '.....ogggggggggggggo....',
+        '......oogggggggggoo.....',
+        '........oogggggoo.......',
+        '..........ooooo.........',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'rain': (
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+        '.....b.......b........b.',
+        '...bbbbb...bbbbb....bbb.',
+        '.bbbwwbbbbbbwwbbbbbbbww.',
+        '.bww..wwbbww..wwbbbww...',
+        '.w......ww......www.....',
+        '........................',
+        '.....b.......b........b.',
+        '...bbbbb...bbbbb....bbb.',
+        '.bbbwwbbbbbbwwbbbbbbbww.',
+        '.bww..wwbbww..wwbbbww...',
+        '.w......ww......www.....',
+        '........................',
+        '.....b.......b........b.',
+        '...bbbbb...bbbbb....bbb.',
+        '.bbbwwbbbbbbwwbbbbbbbww.',
+        '.bww..wwbbww..wwbbbww...',
+        '.w......ww......www.....',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'glove': (
+        '........................',
+        '........................',
+        '........................',
+        '............oo..........',
+        '..........ooco....o.....',
+        '..........occco...ooo...',
+        '..........occco..occco..',
+        '......o...occco..occco..',
+        '....ooco..occco.occcco..',
+        '...occco.occcccoocccco..',
+        '...occccoocccccoccccco..',
+        '...occccoocccccoccccco..',
+        '...occcccoccccccccccco..',
+        '...occcccocccccccccco...',
+        '....occccccccccccccco...',
+        '....occccccccccccccco...',
+        '....occccccccccccccco...',
+        '....occccccccccccccco...',
+        '....occccccccccccccco...',
+        '.....occcccccccccccco...',
+        '.....occccccccccccco....',
+        '......occccccccccoo.....',
+        '......occccccccco.......',
+        '.......ooooooooo........',
+        '........................',
+        '........................',
+    ),
+    'theatre': (
+        '........................',
+        '........................',
+        '........................',
+        '...ooooooooooooooooooo..',
+        '...opppppppppppppppppo..',
+        '...opppppppppppppppppo..',
+        '...opppppppppppppppppo..',
+        '...opppppppppppppppppo..',
+        '...opppooooppppooooppo..',
+        '...oppooooooppoooooopo..',
+        '...oppooooooppoooooopo..',
+        '...oppooooooppoooooopo..',
+        '...opppooooppppooooppo..',
+        '...opppppppppppppppppo..',
+        '...opppppppppppppppppo..',
+        '...opppppppppppprppppo..',
+        '....opppprppppprrrppo...',
+        '....oppprrrppprrrppo....',
+        '.....oppprrrrrrppppo....',
+        '......opppprrrppppo.....',
+        '.......opppprppppo......',
+        '.......oppppppppo.......',
+        '........opppppppo.......',
+        '.........ooooooo........',
+        '........................',
+        '........................',
+    ),
+    'compass': (
+        '........................',
+        '........................',
+        '........................',
+        '.........oooooo.........',
+        '.......ooggggggoo.......',
+        '......ogggggoggggo......',
+        '.....ogggggoogggggo.....',
+        '....oggggggobogggggo....',
+        '....ogggggobbogggggo....',
+        '...oggggggobbbogggggo...',
+        '...ogggggobbobogggggo...',
+        '...oggggoooogoboogggo...',
+        '...oggggooggggooggggo...',
+        '...oggggoooogoroogggo...',
+        '...ogggggorrorogggggo...',
+        '....ogggggorrroggggo....',
+        '....ogggggorrogggggo....',
+        '.....ogggggoroggggo.....',
+        '......oggggooggggo......',
+        '.......oogggoggoo.......',
+        '.........oooooo.........',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'skull': (
+        '........................',
+        '........................',
+        '..........oooooo........',
+        '........ooppppppoo......',
+        '.......oppppppppppo.....',
+        '......oppppppppppppo....',
+        '......oppppppppppppo....',
+        '.....oppppppppppppppo...',
+        '.....opppoopppppooppo...',
+        '.....oppoooopppoooopo...',
+        '.....oppoooopppoooopo...',
+        '.....oppoooopppoooopo...',
+        '......oppoopppppoopo....',
+        '......oppppppopppppo....',
+        '.......oooooooooooo.....',
+        '.......oppppooopppo.....',
+        '.......opppoooooppo.....',
+        '.......oppppppppppo.....',
+        '.......opopppopppoo.....',
+        '.......opopppopppoo.....',
+        '.......opopppopppoo.....',
+        '.......opopppopppoo.....',
+        '.......oooooooooooo.....',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'match': (
+        '........................',
+        '.......................r',
+        '.....oooo............rrr',
+        '.....opppoooooooo...rrrr',
+        '.....oppppppppppporrrrrr',
+        '.....opppppppppppprrrrrr',
+        '.....oppppppppppppprrrrr',
+        '.....occcccccccrppprrrr.',
+        '.....oppppppppprrrpprrr.',
+        '.....opppppppppprrrrrrr.',
+        '.....opppppppppprrrrrrr.',
+        '.....occcccccccpprrrrrr.',
+        '....opppppppppppprrrrrr.',
+        '....oppppppppppppprrrrr.',
+        '....opcccccccccppprrrrr.',
+        '....opppppppppppprrrrrr.',
+        '....opppppppppppprrrrrr.',
+        '....oppppppppppprrrrrrr.',
+        '....oppppppppppprrrrrr..',
+        '....opppppppppprrrrrrr..',
+        '....ooooooooppprrrrrrr..',
+        '............oorrrrrrrr..',
+        '..................rrrr..',
+        '.....................r..',
+        '........................',
+        '........................',
+    ),
+    'vial': (
+        '........................',
+        '........................',
+        '.........ooooooo........',
+        '.........owwwwwo........',
+        '.........owwwwwo........',
+        '.........owwwwwo........',
+        '.........owwwwwo........',
+        '.........owwwwwo........',
+        '.........ooooooo........',
+        '.........owwwwwo........',
+        '........owwwwwwwo.......',
+        '........owwwwwwwo.......',
+        '........owwwwwwwo.......',
+        '.......owwwwwwwwwo......',
+        '.......owwwwwwwwwo......',
+        '.......lllllllllll......',
+        '......olllllllllllo.....',
+        '......olllllllllllo.....',
+        '......lllllllllllll.....',
+        '.....olllllllllllllo....',
+        '.....olllllllllllllo....',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'book': (
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+        '..o...................o.',
+        '..ooooo..........oooooo.',
+        '..oooooooooggoooooooooo.',
+        '..oopooooooggooooooopoo.',
+        '..oopppooooggooooppppoo.',
+        '..ooppppppoggopppppppoo.',
+        '..oopccpppoggopppccccoo.',
+        '..oopppcccoggocccppppoo.',
+        '..ooppppppoggopppppppoo.',
+        '..oopccpppoggopppccccoo.',
+        '..oopppcccoggocccppppoo.',
+        '..oopppppppggopppppppoo.',
+        '..oopccppppggopppccccoo.',
+        '..oopppcccpggocccppppoo.',
+        '..oooooppppggoppppooooo.',
+        '..oooooooopggopoooooooo.',
+        '.......ooooggooooo......',
+        '...........gg...........',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'feather': (
+        '........................',
+        '........................',
+        '....................oo..',
+        '................oooowo..',
+        '............oooowwwwo...',
+        '..........oowwwwwwwwo...',
+        '.........owwwwwwwwwwo...',
+        '.........owwwwwwwwwo....',
+        '........owwwwwwwcwwo....',
+        '.......owwwwwwwcwwwo....',
+        '.......owwwwwwcwwwwo....',
+        '......owwwwwwcwwwwo.....',
+        '.....owwwwwwwcwwwwo.....',
+        '.....owwwwwwcwwwwo......',
+        '....owwwwwwcwwwoo.......',
+        '....owwwwwcwwwo.........',
+        '....owwwwcwwwo..........',
+        '....owwwcwwoo...........',
+        '....owwcwwo.............',
+        '...owwwcwo..............',
+        '...owwcoo...............',
+        '...owco.................',
+        '...oc...................',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'message': (
+        '........................',
+        '........................',
+        '..................o.....',
+        '....ooooooooooooooo.....',
+        '....oopoooooooooooo.....',
+        '....ooppprppppppppo.....',
+        '....oopprrrpppppppoo....',
+        '....ooppprrrppppppoo....',
+        '.....oppccrrrcccppro....',
+        '.....oppppprrpppprrr....',
+        '.....opppppprrpprrro....',
+        '.....oppccccrrrcrrpo....',
+        '.....oppppppprrrrrpoo...',
+        '.....ooppppppprrrppoo...',
+        '.....oopcccccccrpppoo...',
+        '.....ooppppppppppppoo...',
+        '.....oopppppppppppppo...',
+        '.....oopccccccccppppo...',
+        '......opppppppppppppoo..',
+        '......opppppppppppppoo..',
+        '......opppppppoooooooo..',
+        '......opooooooooo.......',
+        '......oooooo............',
+        '......o.................',
+        '........................',
+        '........................',
+    ),
+    'anchor': (
+        '........................',
+        '........................',
+        '...........ooo..........',
+        '..........ogggo.........',
+        '.........ogggggo........',
+        '.........ogggggo........',
+        '.........ogggggo........',
+        '..........ogggo.........',
+        '...........ooo..........',
+        '...........www..........',
+        '...........www..........',
+        '...........www..........',
+        '...........www..........',
+        '...........www..........',
+        '....wwww...www...wwww...',
+        '....wwww...www...wwww...',
+        '....wwwww..www..wwwww...',
+        '.....wwwww.www.wwwww....',
+        '......wwww.www.wwww.....',
+        '.......wwwwwwwwwww......',
+        '........wwwwwwwww.......',
+        '........wwwwwwwww.......',
+        '.........wwwwwww........',
+        '..........wwwww.........',
+        '...........w.w..........',
+        '........................',
+    ),
+    'scales': (
+        '........................',
+        '........................',
+        '........................',
+        '............gg..........',
+        '............gg..........',
+        '............gg..........',
+        '............gg..........',
+        '............gg..........',
+        '...gggwgggggggggggwggg..',
+        '...gggwwgggggggggwwggg..',
+        '.....w.w....gg...w.w....',
+        '.....w..w...gg..w..w....',
+        '.....w..w...gg..w..w....',
+        '.....w...w..gg.w...w....',
+        '....w....w..gg.w....w...',
+        '....wwwwwww.ggwwwwwww...',
+        '............gg..........',
+        '............gg..........',
+        '............gg..........',
+        '............gg..........',
+        '............gg..........',
+        '.......ggggggggggg......',
+        '.......ggggggggggg......',
+        '.......ggggggggggg......',
+        '........................',
+        '........................',
+    ),
+    'flower': (
+        '........................',
+        '........................',
+        '...........ooo..........',
+        '.........oollloo........',
+        '.........olllllo........',
+        '........olllllllo.......',
+        '......ooolllllllooo.....',
+        '....oollloollloollloo...',
+        '....olllllolllolllllo...',
+        '...olllllllggglllllllo..',
+        '...ollllllgggggllllllo..',
+        '...olllllggggggglllllo..',
+        '....olloogggggggoollo...',
+        '....ooollgggggggllooo...',
+        '.....ollllgggggllllo....',
+        '....ollllllgggllllllo...',
+        '....olllllllolllllllo...',
+        '....olllllllolllllllo...',
+        '.....olllllo.olllllo....',
+        '.....oollloo.oollloo....',
+        '.......ooo.....ooo......',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'pocket': (
+        '........................',
+        '........................',
+        '.........ccccc..........',
+        '.........ccccc..........',
+        '.........ccccco.........',
+        '.......oocccccooo.......',
+        '......ooooggggoooo......',
+        '.....ooogggcggggooo.....',
+        '....ooogcgoopcgggooo....',
+        '....oogggpoopppgggoo....',
+        '....ooggppooppppcgoo....',
+        '...oogcpppoopppppggoo...',
+        '...ooggpppoopppppggoo...',
+        '...oocgpppoopppppcgoo...',
+        '...ooggppppooopppggoo...',
+        '...ooggpppppppoooggoo...',
+        '....oocgppppppppogoo....',
+        '....oogggppppppgggoo....',
+        '....oooggcppppcggooo....',
+        '.....ooogggcggggooo.....',
+        '......ooooggggoooo......',
+        '.......oooooooooo.......',
+        '.........oooooo.........',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'globe': (
+        '........................',
+        '........................',
+        '............g...........',
+        '..........oogooo........',
+        '........oobbglbboo......',
+        '.......obbblgllbbbo.....',
+        '......obbbblgllbbbbo....',
+        '.....obbbbblgllbbbbbo...',
+        '.....obbbbllglllbbbbo...',
+        '.....obbbbllglllbbbbo...',
+        '....obbbbbllglllbbbbbo..',
+        '....obbbbbllglllbbbbbo..',
+        '...gggggggggggggggggggg.',
+        '....obbbbbllglllbbbbbo..',
+        '....obbbbbllglllbbbbbo..',
+        '.....obbbbllglllbbbbo...',
+        '.....obbbbllglllbbbbo...',
+        '.....obbbbblgllbbbbbo...',
+        '......obbbblgllbbbbo....',
+        '.......obbblgllbbbo.....',
+        '........oobbglbboo......',
+        '..........oogooo........',
+        '............g...........',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'footstep': (
+        '........................',
+        '.......p................',
+        '......ppppp.............',
+        '.......p.pp.............',
+        '......ooopp.............',
+        '.....orrco..............',
+        '....orrrrco.............',
+        '....orrrrco.............',
+        '....orrrrco.............',
+        '....ocrrcco......p......',
+        '....occccco.....ppp.....',
+        '.....occco.......p......',
+        '......ooo...............',
+        '.............ooo........',
+        '............occco.......',
+        '...........ocrrcco......',
+        '...........orrrrco......',
+        '...........orrrrco......',
+        '...........orrrrco......',
+        '...........ocrrcco......',
+        '............occco.......',
+        '.............ooo........',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'portrait_gold': (
+        '........................',
+        '........................',
+        '..ooooooooooooooooooooo.',
+        '..ogggggggggggggggggggo.',
+        '..ogggggggggggggggggggo.',
+        '..oggcccccccccccccccggo.',
+        '..oggcbbbbbbbbbbbbbcggo.',
+        '..oggcbbbbbooobbbbbcggo.',
+        '..oggcbbbbofffobbbbcggo.',
+        '..oggcbbbofffffobbbcggo.',
+        '..oggcbbbofffffobbbcggo.',
+        '..oggcbbbofffffobbbcggo.',
+        '..oggcbbbbofffobbbbcggo.',
+        '..oggcbbbbbooobbbbbcggo.',
+        '..oggcbbooooooooobbcggo.',
+        '..oggcbborrrrrrrobbcggo.',
+        '..oggcborrrrrrrrrobcggo.',
+        '..oggcborrrrrrrrrobcggo.',
+        '..oggcorrrrrrrrrrrocggo.',
+        '..oggcorrrrrrrrrrrocggo.',
+        '..oggorrrrrrrrrrrrroggo.',
+        '..oggoooooooooooooooggo.',
+        '..ogggggggggggggggggggo.',
+        '..ogggggggggggggggggggo.',
+        '..ooooooooooooooooooooo.',
+        '........................',
+    ),
+    'candle': (
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+        '.........ccccccc........',
+        '.........ccccccc........',
+        '...........ggg..........',
+        '.......ooooggggooo......',
+        '.......ogggggggggo......',
+        '.......ogggggggggo......',
+        '.......ogpppgggpgo......',
+        '.......ogppppgppgo......',
+        '.......ogpppppppgo......',
+        '.......ogpppppppgo......',
+        '.......ogpppppppgo......',
+        '.......ogpppppppgo......',
+        '.......ogpppppppgo......',
+        '.......ogpppppppgo......',
+        '.......ogpppppppgo......',
+        '.......ogggggggggo......',
+        '.......ogggggggggo......',
+        '.......ooooooooooo......',
+        '........................',
+        '........................',
+        '........................',
+        '........................',
+    ),
+    'cobweb': (
+        'wwwwwwwwwwwwwwwwwwwwwwww',
+        'wwwwwwwww...w......w....',
+        'wwwwwwww.wwwwww....w....',
+        'wwwwwww.www.w..wwwwww...',
+        'wwww.wwww..ww......w.www',
+        'wwwww.ww.ww.wwww...w....',
+        'wwwwwwwwww.ww...wwww....',
+        'www.www.w.w.www....www..',
+        'ww.ww.ww.w.ww..ww..w..ww',
+        'w.ww.ww.w.w.ww...www....',
+        'w.ww.w.w.w.ww.ww...ww...',
+        'w.w.w.w.w.w.ww..w..w.ww.',
+        'wwwwwwwwwwwww.w..w.w...w',
+        'w.w..w.w.w.w...w..ww....',
+        'w.w..w.w..w.w...w..ww...',
+        'w..w.w..w.w..w...w.w.ww.',
+        'w..w..w.w..w..w...ww...w',
+        'w..w..w..w..w..w...ww...',
+        'w..w..w..w...w..w..w.w..',
+        'wwwwwwwwwwwwwwwwwwww..w.',
+        'w..w...w..w...w..w.....w',
+        'w...w..w...w...w..w.....',
+        'w...w...w..w...w...w....',
+        'w...w...w...w...w...w...',
+        '........................',
+        '........................',
+    ),
+}
 
-class FollowCamera:
+
+
+ICON_COLORS = {
+    "o": (20, 25, 34, 255),
+    "p": (221, 202, 159, 255),
+    "g": (221, 169, 87, 255),
+    "b": (70, 98, 127, 255),
+    "r": (150, 65, 77, 255),
+    "l": (77, 133, 90, 255),
+    "w": (194, 197, 185, 255),
+    "c": (117, 78, 55, 255),
+    "f": (193, 147, 114, 255),
+}
+
+
+class IconLibrary:
+    """Draw actual low-resolution evidence stamps from the embedded atlas."""
+
     def __init__(self):
-        self.x,self.y = 14.5,12.5
-        self.zoom = 1.
-        self.target_zoom = 1.
+        self.cache = {}
 
-    def follow(self,pos,dt):
-        self.zoom += (self.target_zoom-self.zoom)*min(1,dt*12)
-        self.x += (pos[0]-self.x)*min(1,dt*8)
-        self.y += (pos[1]-self.y)*min(1,dt*8)
-        half_w = VIEW_W/(2*TILE*self.zoom)
-        half_h = VIEW_H/(2*TILE*self.zoom)
-        self.x = NX/2 if half_w>=NX/2 else max(half_w,min(NX-half_w,self.x))
-        self.y = NY/2 if half_h>=NY/2 else max(half_h,min(NY-half_h,self.y))
-
-    def project(self,x,y):
-        return x,y
-
-
-class ArtBase:
-    def draw_effect(self, f):
-        progress = 1 - f['ttl'] / f['life']
-        x, y = self.point(f['pos'])
-        c = f['color']
-        size = f['size']
-        kind = f['kind']
-        end = self.point(f['end']) if f['end'] else (x, y)
-        if kind in ('beam', 'rail', 'acid'):
-            self.line([(x, y), end], c, 5 * (1 - progress) + 1 if kind == 'rail' else 2)
-            if kind == 'rail':
-                self.line([(x, y), end], '#ecfcff', 2 * (1 - progress) + 0.5)
-        elif kind == 'flame':
-            a = math.atan2(end[1] - y, end[0] - x)
-            for i in range(11):
-                t = (i + progress) / 11
-                r = (5 + 12 * t) * (1 - progress * 0.4)
-                offset = math.sin(i * 8) * 0.3
-                px = x + math.cos(a + offset) * size * TILE * t
-                py = y + math.sin(a + offset) * size * TILE * t
-                self.oval(px - r / 2, py - r / 2, r, r, '#ffd08c' if i % 2 else '#f1a36d')
-        elif kind in ('ring', 'shockwave', 'frost', 'build', 'upgrade', 'repair', 'explosion', 'defeat', 'hit', 'dust'):
-            radius = max(2, (0.12 + progress * 0.88) * size * TILE)
-            if kind in ('explosion', 'hit') and progress < 0.3:
-                self.oval(x - radius / 2, y - radius / 2, radius, radius, '#fff0bf')
-            self.oval(x - radius, y - radius, 2 * radius, 2 * radius, '', c, max(0.5, 3 * (1 - progress)))
-            count = 12 if kind in ('explosion', 'upgrade', 'defeat') else 6
-            for i in range(count):
-                a = i * math.tau / count + progress * 0.8
-                px = x + math.cos(a) * radius
-                py = y + math.sin(a) * radius
-                if kind == 'repair':
-                    self.line([(px - 3, py), (px + 3, py)], c, 2)
-                    self.line([(px, py - 3), (px, py + 3)], c, 2)
-                elif kind == 'frost':
-                    self.line([(px - 3, py - 3), (px + 3, py + 3)], c, 2)
-                else:
-                    r = max(1, 3 * (1 - progress))
-                    self.oval(px - r, py - r, r * 2, r * 2, c)
-        elif kind == 'text':
-            self.text(x, y - progress * 32, f['text'], 12, c, True, anchor='center')
-        elif kind == 'slash':
-            self.line([(x - 12, y + 9), (x + 11, y - 10)], c, 3 * (1 - progress) + 1)
-            self.line([(x - 5, y + 12), (x + 15, y - 7)], c, 2)
-        elif kind == 'leap':
-            for i in range(5):
-                t = i / 4
-                px = x + (end[0] - x) * t
-                py = y + (end[1] - y) * t - math.sin(t * math.pi) * 24
-                self.oval(px - 2, py - 2, 4, 4, c)
-        elif kind == 'muzzle':
-            a = math.atan2(end[1] - y, end[0] - x)
-            px = x + math.cos(a) * 19
-            py = y + math.sin(a) * 19
-            self.polygon([(px - 5, py), (px, py - 5), (px + 5, py), (px, py + 5)], c)
+    def photo(self, kind, zoom=3, dim=False):
+        key = (kind, zoom, dim)
+        if key in self.cache:
+            return self.cache[key]
+        rows = ICON_RASTERS.get(kind, ICON_RASTERS["note"])
+        im = Image.new("RGBA", (24, 26), (0, 0, 0, 0))
+        px = im.load()
+        for yy, row in enumerate(rows):
+            for xx, symbol in enumerate(row[:24]):
+                if symbol in ICON_COLORS:
+                    rgba = ICON_COLORS[symbol]
+                    if dim:
+                        rgba = (rgba[0] // 2, rgba[1] // 2, rgba[2] // 2, 190)
+                    px[xx, yy] = rgba
+        im = im.resize((24 * zoom, 26 * zoom), Image.Resampling.NEAREST)
+        result = ImageTk.PhotoImage(im)
+        self.cache[key] = result
+        return result
 
 
-def plain_upgrade(upgrade):
-    effects=upgrade['effects']
-    pieces=[]
-    for key,value in effects.items():
-        if key=='damage':pieces.append(f'{round((value-1)*100)}% more damage')
-        elif key=='range':pieces.append(f'{round((value-1)*100)}% farther reach')
-        elif key=='rate':pieces.append(f'fires {round((value-1)*100)}% faster')
-        elif key=='burst':pieces.append(f'{value} shots each time it fires')
-        elif key=='pierce_armor':pieces.append('bug shells no longer reduce its damage')
-        elif key=='mark':pieces.append('hit bugs take 20% more damage from all robots')
-        elif key=='boss_bonus':pieces.append(f'{value}× damage to big beetles and the boss')
-        elif key=='splash':pieces.append('hits a wider area')
-        elif key=='slow':pieces.append(f'hit bugs move {round((1-value)*100)}% slower')
-        elif key=='stun':pieces.append(f'freezes bugs in place for {value:g}s')
-        elif key=='burn':pieces.append(f'burning deals {value} damage each second')
-        elif key=='hp':pieces.append(f'{round((value-1)*100)}% more building health')
-        elif key=='guard':pieces.append('nearby buildings take 30% less damage')
-        elif key=='heal':pieces.append(f'repairs {round((value-1)*100)}% more health')
-        elif key=='heal_targets':pieces.append(f'repairs {value} neighbors at once')
-        elif key=='core_heal':pieces.append(f'repairs the core {value:g}× as quickly')
-        elif key=='shield':pieces.append('gives nearby allies damage-absorbing shields')
-        elif key=='aura_rate':pieces.append('nearby robots fire faster')
-        elif key=='aura_range':pieces.append('nearby robots reach 20% farther')
-        elif key=='aura_damage':pieces.append('nearby robots deal 35% more damage')
-        elif key=='bounty':pieces.append('nearby kills earn 40% more dollars')
-        elif key=='support_rate':pieces.append('nearby robots fire 20% faster')
-        elif key=='ground':pieces.append('can now shoot ground bugs too')
-        elif key=='air_bonus':pieces.append('extra damage against flying bugs')
-        elif key=='chain':pieces.append(f'shots bounce to {value} more bugs')
-        elif key=='pellets':pieces.append(f'fires {value} pellets per shot')
-        elif key=='death_blast':pieces.append('defeated bugs explode and damage neighbors')
-        elif key=='explosion':pieces.append('hits explode and damage nearby bugs')
-        elif key=='cluster':pieces.append(f'rockets split into {value} smaller blasts')
-        elif key=='hazard':pieces.append('leaves a damaging patch on the ground')
-        elif key=='beam_width':pieces.append('a wider beam hits more bugs in a line')
-        elif key=='cone':pieces.append('a wider spread catches more bugs')
-        elif key=='priority':pieces.append('aims at armored bugs first')
-    text='; '.join(pieces) if pieces else upgrade['description']
-    return text[0].upper()+text[1:]+'.'
+class AmbientParticles:
+    """Low-cost animated motes, sparks, water and floating ash in world space."""
+
+    def __init__(self, chapter):
+        self.chapter = chapter
+        self.rng = random.Random(9060 + chapter * 41)
+        self.dust = []
+        self.embers = []
+        self.sparks = []
+        for i in range(22):
+            self.dust.append([
+                self.rng.uniform(25, WORLD_W - 25),
+                self.rng.uniform(50, WORLD_H - 25),
+                self.rng.uniform(.18, .8),
+                self.rng.uniform(8, 30),
+                self.rng.uniform(-.3, .3),
+            ])
+        for i in range(8):
+            self.embers.append([
+                self.rng.uniform(205, 298),
+                self.rng.uniform(45, 100),
+                self.rng.uniform(1, 3),
+                self.rng.uniform(.2, 2.5),
+            ])
+        for i in range(7):
+            self.sparks.append([
+                self.rng.uniform(25, WORLD_W - 25),
+                self.rng.uniform(50, WORLD_H - 30),
+                self.rng.uniform(.4, 1.6),
+                self.rng.uniform(0, 6.28),
+            ])
+
+    def render(self, canvas, projector, elapsed, focus=False):
+        theme = THEMES[self.chapter]["name"]
+        # Night dust moves independently from the character animation; it is
+        # visible over the floor, not an animated background slideshow.
+        if theme in {"manor", "hotel", "archive", "court", "crypt", "observatory"}:
+            for i, (wx, wy, sz, drift, bend) in enumerate(self.dust):
+                px = wx + math.sin(elapsed * .23 + i) * drift
+                py = wy + math.cos(elapsed * .31 + i * 1.8) * 11
+                sx, sy = projector(px, py)
+                if VIEW_X < sx < VIEW_X + VIEW_W and VIEW_Y < sy < VIEW_Y + VIEW_H:
+                    size = max(1, int(sz * PIXEL_SCALE))
+                    canvas.create_rectangle(sx, sy, sx + size, sy + size,
+                                            fill="#8b7c77" if i % 4 else "#bd9664", outline="", tags="world_render")
+        if theme in {"manor", "theater", "archive", "crypt"}:
+            for i, (wx, wy, sz, phase) in enumerate(self.embers):
+                px = wx + math.sin(elapsed * (1 + phase) + i) * 8
+                py = wy - (elapsed * (5 + phase * 2) + i * 13) % 68
+                sx, sy = projector(px, py)
+                if VIEW_X < sx < VIEW_X + VIEW_W and VIEW_Y < sy < VIEW_Y + VIEW_H:
+                    canvas.create_rectangle(sx, sy, sx + sz, sy + sz,
+                                            fill="#d8a563" if i % 2 else "#9f624a", outline="", tags="world_render")
+        if theme in {"greenhouse", "docks"}:
+            for i, (wx, wy, sz, phase) in enumerate(self.sparks):
+                px = wx + math.sin(elapsed * .8 + phase) * 7
+                py = wy + math.cos(elapsed * .9 + phase) * 9
+                sx, sy = projector(px, py)
+                if VIEW_X < sx < VIEW_X + VIEW_W and VIEW_Y < sy < VIEW_Y + VIEW_H:
+                    radius = sz + .8 * math.sin(elapsed * 2 + i)
+                    canvas.create_oval(sx - radius, sy - radius, sx + radius, sy + radius,
+                                       fill="#97c5a5" if theme == "greenhouse" else "#5f91a4", outline="", tags="world_render")
 
 
-def upgrade_comparison(building,path):
-    before=building.stats()
-    preview=Building(building.x,building.y,building.kind)
-    preview.paths=list(building.paths)
-    preview.paths[path]+=1
-    after=preview.stats()
-    pairs=[]
-    if before['damage']!=after['damage']:pairs.append(f'Damage {before["damage"]:g} to {after["damage"]:g}')
-    if before['range']!=after['range']:pairs.append(f'Reach {before["range"]:.1f} to {after["range"]:.1f} tiles')
-    if before['rate']!=after['rate']:
-        cooldown=building.spec['cooldown']
-        pairs.append(f'Shot delay {cooldown/before["rate"]:.2f}s to {cooldown/after["rate"]:.2f}s')
-    if before['hp']!=after['hp']:pairs.append(f'Health {before["hp"]:g} to {after["hp"]:g}')
-    if before['burst']!=after['burst']:pairs.append(f'Shots {before["burst"]} to {after["burst"]}')
-    if before['heal']!=after['heal']:pairs.append(f'Repair {40*before["heal"]:g} to {40*after["heal"]:g} health')
-    return '  ·  '.join(pairs[:2]) or 'Adds the ability described above'
+# Room plans share wall/collision geometry with their paintings. Each room is
+# built as a separate navigable space, rather than three copies of one backdrop.
+# Objects are logical parts of each room and nothing is labelled on the floor.
+
+ROOM_TITLES = [
+    ("Grand hall", "Butler's archive", "Under the hearth"),
+    ("Station concourse", "Dispatch office", "Old service tunnel"),
+    ("Hotel lobby", "Doctor's surgery", "Coal cellar"),
+    ("Auditorium", "Backstage office", "Fly gallery"),
+    ("Reading room", "Registrar's study", "Forgotten stacks"),
+    ("Glass atrium", "Patron's laboratory", "Root cellar"),
+    ("Quayside office", "Harbormaster's cabin", "Smuggler's drain"),
+    ("Observation hall", "Director's office", "Old instrument vault"),
+    ("Court hall", "Magistrate's chambers", "Buried evidence vault"),
+    ("Family chapel", "Evelyn's chamber", "Founder's ossuary"),
+]
+
+SECRET_FEATURES = [
+    ((274, 97), "the fireplace latch", "The fireplace rolls aside; a stair descends through the ash."),
+    ((274, 94), "the abandoned freight lift", "The disused freight lift opens on an older service stair."),
+    ((90, 145), "the false back of the wardrobe", "The wardrobe gives way to a stone passage used by the hotel's staff."),
+    ((411, 100), "the seam in the stage curtain", "Behind the velvet, a narrow service stair runs beneath the stage."),
+    ((416, 94), "the loose archive shelving", "The shelf pivots and reveals a forgotten stair of stacked stone."),
+    ((466, 108), "the maintenance hatch behind the glass", "An iron grate beneath the glass opens over brick steps."),
+    ((269, 115), "the concealed dockside hatch", "Salt-soaked boards lift from a stone stair to the old drainage route."),
+    ((316, 117), "the telescope's service latch", "A brass catch releases a narrow stair under the dome."),
+    ((275, 126), "the judge's hidden panel", "The magistrate's bench slides aside, exposing a foundation stair."),
+    ((328, 221), "the concealed portrait hinge", "The founder's portrait moves on a hinge; worn stone steps descend."),
+]
+
+ROOM_MOODS = [
+    ("A live fire keeps the cold from the family's empty chairs.", "The steward's books are too neat to be honest.", "Coal dust gives way to older stone. Someone went to great lengths to hide this."),
+    ("Steam whistles beneath a vaulted roof.", "There are two manifests, and only one was shown to the authorities.", "A disused platform runs beneath the modern station."),
+    ("Polished marble conceals the smell of disinfectant.", "The doctor's locked records are laid out beside an examination couch.", "The hotel's abandoned heating passage hides old patient files."),
+    ("Empty seats face a stage still bright with ghost light.", "Cue books and black velvet fill the cramped office.", "Above the scenery, the theater keeps its oldest secrets."),
+    ("Dust softens every step in the municipal archive.", "The registrar's personal records contradict the city's.", "Behind the shelves, a second catalogue has escaped the fire."),
+    ("Rain taps a thousand small panes of glass.", "Iris's research sits beneath the patron's lock.", "Roots push through the bricks as though the garden is reclaiming them."),
+    ("The tide speaks louder than anyone in the harbor office.", "Unregistered cargo has been entered in a private ledger.", "The drains point toward a quay missing from every chart."),
+    ("The dome trembles against the night wind.", "The director's sightline ends at the courthouse tower.", "The brass instruments share a secret mechanism."),
+    ("Every footstep returns as an accusation.", "Sealed judgments line the private chambers.", "The original verdict lies behind the courthouse's foundation."),
+    ("The family portraits seem to watch you leave.", "Evelyn arranged the truth like a trap.", "The crypt is older than the manor above it."),
+]
+
+PRIVATE_PROPS = [
+    [("bookcase", 148, 68, 0), ("bookcase", 217, 68, 1), ("desk", 348, 100, 1), ("armchair", 395, 245, 0), ("painting", 290, 42, 1), ("clock", 464, 54, 1), ("wardrobe", 468, 295, 0)],
+    [("bench", 153, 84, 0), ("desk", 365, 95, 0), ("suitcase", 223, 146, 0), ("clock", 287, 51, 0), ("coatstand", 474, 285, 0), ("crate", 389, 261, 0)],
+    [("counter", 145, 78, 0), ("desk", 345, 95, 0), ("bell", 337, 94, 0), ("armchair", 399, 271, 0), ("wardrobe", 474, 284, 1), ("plant", 192, 294, 1)],
+    [("piano", 148, 77, 0), ("desk", 342, 103, 0), ("film", 377, 105, 0), ("velvet", 436, 250, 0), ("wardrobe", 470, 280, 0), ("coatstand", 200, 271, 0)],
+    [("bookcase", 147, 70, 1), ("bookcase", 213, 70, 2), ("desk", 347, 105, 0), ("clock", 460, 45, 0), ("bookcase", 465, 265, 0), ("armchair", 215, 279, 0)],
+    [("plant", 167, 77, 2), ("plant", 226, 79, 1), ("desk", 340, 104, 0), ("plant", 450, 272, 0), ("bench", 183, 273, 0), ("glass", 389, 112, 1)],
+    [("crate", 165, 69, 1), ("crate", 198, 71, 0), ("desk", 343, 96, 0), ("barrel", 457, 279, 0), ("rope", 213, 272, 0), ("lantern", 308, 52, 0)],
+    [("telescope", 203, 86, 0), ("desk", 346, 104, 0), ("bookshelf", 456, 270, 1), ("scope", 192, 266, 0), ("globe", 428, 91, 0), ("clock", 304, 52, 2)],
+    [("judgebench", 143, 82, 0), ("desk", 342, 105, 0), ("bookshelf", 450, 272, 0), ("portrait", 280, 47, 0), ("bench", 170, 281, 1)],
+    [("altar", 164, 76, 0), ("desk", 345, 105, 0), ("portrait", 286, 48, 2), ("statue", 459, 260, 0), ("candle", 328, 98, 0), ("coffin", 176, 272, 0)],
+]
+
+PASSAGE_PROPS = [
+    [("bookcase", 150, 133, 0), ("crate", 382, 262, 0)],
+    [("crate", 160, 118, 0), ("barrel", 379, 274, 0)],
+    [("barrel", 170, 113, 0), ("crate", 385, 269, 1)],
+    [("crate", 167, 128, 1), ("rope", 391, 280, 0)],
+    [("bookcase", 148, 128, 1), ("bookcase", 374, 269, 2)],
+    [("plant", 165, 132, 2), ("plant", 393, 280, 1)],
+    [("crate", 164, 123, 1), ("barrel", 392, 273, 0)],
+    [("scope", 160, 135, 0), ("crate", 378, 266, 2)],
+    [("bookshelf", 155, 130, 0), ("crate", 384, 274, 1)],
+    [("statue", 162, 125, 1), ("coffin", 349, 266, 0)],
+]
 
 
-class EngineerGame(ArtBase):
+def room_architecture_walls(room):
+    if room == 1:
+        # Vestibule -> narrow opening -> records room. The east room has a
+        # second southern partition, open around the center for a real route.
+        return [(112, 39, 122, 172), (112, 241, 122, 356),
+                (160, 238, 270, 247), (326, 238, 517, 247)]
+    if room == 2:
+        # Stone vault and a narrower stair throat, with a crossing at y=223.
+        return [(20, 60, 119, 294), (429, 60, 528, 294),
+                (126, 221, 252, 234), (308, 221, 422, 234)]
+    return []
+
+
+def make_room(chapter, room):
+    world = make_level(chapter)
+    if room == 0:
+        world.collisions = build_collisions(world.props)
+        return world
+    if room == 1:
+        world.props = list(PRIVATE_PROPS[chapter])
+        world.objects = [Item("private_file", "The private register", 458, 155,
+                              "paper", SECRET_REVEALS[chapter])]
+        world.witness = Agent(46, 46)
+        world.killer = Agent(450, 106, "down", coat=(chapter+2)%4,
+                             hair=(chapter+1)%4, skin=1, hat=chapter%2==0)
+        world.civilians = []
+        world.hide_positions = [(91, 309), (495, 305)]
+        world.blend_zones = []
+        world.patrol = [(171, 202), (273, 201), (366, 205), (460, 203)]
+        world.start = (56, 209)
+    else:
+        world.props = list(PASSAGE_PROPS[chapter])
+        world.objects = [Item("archive_secret", "A letter within the stonework",
+                              348, 163, "note", SECRET_REVEALS[chapter])]
+        world.witness = Agent(45, 45)
+        world.killer = Agent(45, 45)
+        world.civilians = []
+        world.hide_positions = []
+        world.blend_zones = []
+        world.patrol = []
+        world.start = (280, 317)
+    world.collisions = build_collisions(world.props) + room_architecture_walls(room)
+    world.start = find_nearest_open(world, world.start)
+    world.killer.x, world.killer.y = find_nearest_open(world, world.killer.feet)
+    for obj in world.objects:
+        if solid_at(world, obj.x, obj.y, 3):
+            obj.x, obj.y = find_nearest_open(world, (obj.x, obj.y), 3)
+    world.patrol = [find_nearest_open(world, pt) for pt in world.patrol]
+    return world
+
+
+class RoomPainter(PixelArt):
+    def __init__(self, chapter, room, hearth_open=False):
+        super().__init__(chapter)
+        self.room = room
+        self.hearth_open = hearth_open
+
+    def _portal_details(self):
+        p = self.palette
+        if self.room == 0:
+            # A panelled staff door belongs to the eastern wall. Nothing is
+            # drawn as an unrelated black hatch in the middle of the floor.
+            self.rect((518, 179, 547, 249), (72, 49, 43), p["trim"], 2)
+            self.rect((523, 186, 542, 241), (88, 58, 47), (132, 91, 69))
+            self.rect((525, 191, 540, 211), (57, 41, 37), (117, 84, 65))
+            self.rect((525, 215, 540, 236), (57, 41, 37), (117, 84, 65))
+            self.ellipse((525, 214, 529, 218), (211, 166, 88))
+            # The real fireplace is in the north wall at x=238..310. Its side
+            # latch is just below the marble surround, inside reach.
+            if self.chapter == 0:
+                self.rect((303, 83, 309, 89), (107, 71, 47), (169, 124, 73))
+                self.ellipse((305, 84, 307, 86), (232, 177, 90))
+            if self.chapter == 0 and self.hearth_open:
+                self.rect((248, 53, 299, 88), (11, 17, 25), (143, 96, 69), 2)
+                self.rect((254, 58, 293, 85), (20, 22, 31))
+                for i in range(5):
+                    self.line((254 + i * 2, 64 + i * 4, 293 - i * 2, 64 + i * 4), (80 + i*7, 67 + i*5, 62+i*3), 2)
+                self.rect((238, 45, 244, 79), (111, 76, 61), (144, 98, 69))
+            if self.chapter != 0:
+                fx, fy = SECRET_FEATURES[self.chapter][0]
+                # A small brass hinge is placed on an existing architectural
+                # feature, not a freestanding black hatch on the floor.
+                self.rect((fx-3, fy-3, fx+3, fy+3), (102, 69, 48), (166, 123, 69))
+                self.ellipse((fx-1, fy-1, fx+1, fy+1), (233, 179, 94))
+                if self.hearth_open:
+                    self.rect((fx-13, fy-13, fx+13, fy-5), (18, 21, 29), (125, 95, 72))
+                    for yy in range(fy-11, fy-3, 3):
+                        self.line((fx-9, yy, fx+9, yy), (115, 93, 79))
+        elif self.room == 1:
+            self.rect((0, 178, 30, 236), (79, 54, 46), (169, 122, 71), 2)
+            self.rect((9, 185, 29, 229), (35, 31, 38), (136, 98, 68))
+            self.ellipse((18, 207, 22, 211), (222, 185, 108))
+            # divider walls have substantial depth; door jambs show where
+            # a person passes between vestibule and archive.
+            self.rect((112, 39, 122, 172), p["wall"], p["trim"])
+            self.rect((112, 241, 122, 356), p["wall"], p["trim"])
+            self.rect((112, 169, 122, 175), (153, 119, 88))
+            self.rect((112, 236, 122, 241), (153, 119, 88))
+            self.rect((160, 238, 270, 247), p["wall"], p["trim"])
+            self.rect((326, 238, 517, 247), p["wall"], p["trim"])
+            self.rect((266, 238, 275, 247), (141, 106, 74))
+            self.rect((321, 238, 330, 247), (141, 106, 74))
+            for x in (160, 232, 365, 434):
+                self.rect((x, 45, x+29, 60), (62, 44, 45), (130, 96, 67))
+        else:
+            # The cellar entry opens onto actual descending steps along the
+            # south wall; arch and floor match the narrow stairwell.
+            self.rect((245, 340, 314, 373), (38, 35, 43), (122, 102, 84), 2)
+            self.rect((254, 343, 305, 366), (19, 22, 31), (91, 79, 75))
+            for y in range(345, 363, 5):
+                self.line((259, y, 301, y), (122, 109, 94), 2)
+            self.ellipse((242, 337, 259, 355), (88, 77, 66), (140, 121, 94))
+            self.ellipse((301, 337, 318, 355), (88, 77, 66), (140, 121, 94))
+
+    def render_room(self, level):
+        if self.room == 0:
+            # Hand-painted top-down hall, retaining its chapter-unique props.
+            self.floor()
+            self.boundary()
+            for prop in level.props:
+                if prop[0] in {"rug", "runner", "glassfloor", "stonefloor", "dockfloor", "water"}:
+                    self.prop(prop)
+            for prop in level.props:
+                if prop[0] not in {"rug", "runner", "glassfloor", "stonefloor", "dockfloor", "water"}:
+                    self.prop(prop)
+            self._portal_details()
+        else:
+            self.floor()
+            self.boundary()
+            if self.room == 1:
+                self._private_architecture()
+            else:
+                self._underground_architecture()
+            for prop in level.props:
+                self.prop(prop)
+            self._portal_details()
+        for idx, obj in enumerate(level.objects):
+            if obj.id not in {"uniform"}:
+                self.small_object(obj.kind, obj.x, obj.y, idx)
+        self.lighting()
+        self.vignette()
+        return self.image
+
+    def _private_architecture(self):
+        p = self.palette
+        # A narrow entry vestibule and two connected office spaces. The
+        # materials vary by location; wall geometry matches collision shapes.
+        self.rect((22, 40, 111, 356), shade(p["floor"], .79))
+        for y in range(48, 350, 24):
+            self.line((24, y, 108, y), shade(p["floor_line"], .84))
+        self.small_rug(144, 182, 182, 34, color=shade(p["rug"], .87))
+        self.rect((347, 65, 504, 221), shade(p["floor"], 1.08), shade(p["trim"], .65))
+        for x in range(359, 502, 23):
+            for y in range(75, 219, 23):
+                self.rect((x, y, x+21, y+21),
+                          p["floor2"] if ((x+y)//23)%2 else shade(p["floor"], 1.12),
+                          shade(p["floor_line"], .8))
+        # Lamps and discreet files read as a work area, not a public hall.
+        for x in (174, 283, 471):
+            self.rect((x, 43, x+23, 59), (46, 51, 63), p["trim"])
+            self.rect((x+6, 47, x+17, 55), p["warm"])
+            self.lights.append((x+12, 52, 36, p["warm"]))
+        self.small_rug(372, 259, 102, 50, color=shade(p["rug"], .71))
+        if self.chapter in {1, 6}:
+            for x in (198, 252, 308):
+                self.line((x, 265, x, 347), shade(p["trim"], .85), 2)
+        elif self.chapter in {3, 8}:
+            self.rect((240, 42, 302, 61), (113, 54, 62), (163, 99, 69))
+        elif self.chapter == 5:
+            for x in (175, 215, 295):
+                self.plant(x, 274, 2)
+        elif self.chapter == 7:
+            self.ellipse((224, 260, 306, 336), None, (104, 128, 147), 2)
+
+    def _underground_architecture(self):
+        p = self.palette
+        slate=(33,37,45) if self.chapter != 5 else (31,49,42)
+        mortar=(74,71,76) if self.chapter != 5 else (76,87,77)
+        self.rect((20, 39, 527, 357), slate)
+        # Hand-laid masonry: alternating brick joints, different from the
+        # manor parquet or office tiles, and fully pixel-aligned.
+        for y in range(43, 357, 14):
+            for x in range(24+((y//14)%2)*20, 526, 41):
+                self.rect((x, y, min(x+39,526), min(y+12,356)),
+                          (44+((x+y)%4)*2, 48+((x//17)%4)*2, 57+((y//17)%3)*2), mortar)
+        # Corridor is cut between two heavy buttress walls.
+        self.rect((124, 79, 425, 355), (50, 48, 51), mortar)
+        for yy in range(85, 349, 25):
+            for xx in range(129+(12 if yy//25%2 else 0), 422, 36):
+                self.rect((xx, yy, xx+34, yy+23), (55, 52, 54), (82, 74, 70))
+        self.rect((20, 60, 119, 294), (26,29,36), (93,79,73), 2)
+        self.rect((429, 60, 528, 294), (26,29,36), (93,79,73), 2)
+        for y in range(69, 284, 29):
+            self.line((23, y, 116, y), (70,64,65))
+            self.line((432, y, 525, y), (70,64,65))
+        self.rect((126, 221, 252, 234), (35,38,45), (110,91,77))
+        self.rect((308, 221, 422, 234), (35,38,45), (110,91,77))
+        self.small_rug(256, 86, 47, 121, color=(60,53,62))
+        # The stairs descend away from camera and end at an actual landing.
+        self.rect((247, 95, 314, 188), (29,32,40), (105,91,80),2)
+        for i in range(8):
+            sy=102+i*10
+            self.rect((251+i//3,sy,310-i//3,sy+6),
+                      (62+i*3, 59+i*3, 62+i*2), (96,83,75))
+        for x, y in ((135, 101),(408, 101),(155, 297),(391, 297)):
+            self.rect((x-4,y-7,x+4,y+4), (121,85,58), (45,37,38))
+            self.ellipse((x-2,y-9,x+2,y-4), (233,178,94))
+            self.lights.append((x,y,40, (225,163,91)))
+
+class SpriteFactory:
+    """An in-memory sprite sheet generator with cached PhotoImage frames."""
+
     def __init__(self):
-        self.root = tk.Tk()
-        self.root.title(TITLE)
-        self.root.geometry('1440x940')
-        self.root.minsize(1100,720)
-        self.root.configure(bg='#102839')
-        widget = tk.Canvas(self.root,bg='#102839',highlightthickness=0)
-        widget.pack(fill='both',expand=True)
-        self.scale = 1.
-        self.offset = (0.,0.)
-        self.camera = FollowCamera()
-        self.canvas = CanvasPool(widget,self)
-        self.world = FieldWorld()
-        self.keys = set()
-        self.pending_releases = {}
-        self.state = 'title'
-        self.paused = False
-        self.panel = None
-        self.blueprint = None
-        self.category = 'robots'
-        self.blueprint_page=0
-        self.buttons = []
-        self.hover = (-1,-1)
-        self.quality = True
-        self.real_time = 0.
-        self.last = time.perf_counter()
-        self.accumulator = 0.
-        self.transition = None
-        self.selected_level = 0
-        self.closed = False
-        self.hover_values = {}
-        self.completed = set()
-        self.fullscreen = False
-        self.decor = []
-        self.reset_decor()
-        widget.bind('<Motion>',self.motion)
-        widget.bind('<Button-1>',self.click)
-        widget.bind('<Button-3>',self.cancel_blueprint)
-        widget.bind('<MouseWheel>',self.wheel)
-        widget.bind('<Button-4>',lambda e:self.change_zoom(.1))
-        widget.bind('<Button-5>',lambda e:self.change_zoom(-.1))
-        self.root.bind('<KeyPress>',self.key_down)
-        self.root.bind('<KeyRelease>',self.key_up)
-        self.root.bind('<FocusOut>',self.focus_out)
-        self.root.protocol('WM_DELETE_WINDOW',self.close)
-        self.frame()
+        self.cache: dict[tuple, ImageTk.PhotoImage] = {}
+        self.avatar_previews: dict[tuple, ImageTk.PhotoImage] = {}
+        self.shadow: Optional[ImageTk.PhotoImage] = None
 
-    def close(self):
-        self.closed = True
+    def build(self, coat, hair, skin, facing, walk, hat, accessory=0, ghost=False):
+        im = Image.new("RGBA", (24, 34), (0, 0, 0, 0))
+        d = ImageDraw.Draw(im)
+        sk = SKIN_SWATCHES[skin % len(SKIN_SWATCHES)]
+        ha = HAIR_SWATCHES[hair % len(HAIR_SWATCHES)]
+        co = COAT_SWATCHES[coat % len(COAT_SWATCHES)]
+        edge = (22, 26, 35)
+        seam = shade(co, .7)
+        white = (224, 215, 193)
+        pin = ACCESSORY_COLORS[accessory % 4]
+        step = (0, 1, 0, -1, 0, 1)[walk % 6]
+        swing = (0, 2, 3, 0, -2, -3)[walk % 6]
+        bob = 1 if walk in (1, 4) else 0
+        # Soft ground shadow anchors characters to the tilemap.
+        d.ellipse((4, 29, 20, 33), fill=(6, 12, 21, 80))
+        d.rectangle((9, 23 + max(0, step), 11, 30), fill=edge)
+        d.rectangle((13, 23 + max(0, -step), 15, 30), fill=edge)
+        d.rectangle((8, 27 + max(0, step), 12, 30), fill=(23, 21, 27))
+        d.rectangle((12, 27 + max(0, -step), 16, 30), fill=(23, 21, 27))
+
+        if facing == "down":
+            d.polygon([(7, 14 + bob), (17, 14 + bob), (19, 27), (5, 27)], fill=co, outline=edge)
+            d.polygon([(6, 15), (9, 17), (7 + swing // 2, 24), (4, 24)], fill=co, outline=edge)
+            d.polygon([(18, 15), (15, 17), (17 - swing // 2, 24), (20, 24)], fill=co, outline=edge)
+            d.polygon([(10, 15), (14, 15), (13, 23), (11, 23)], fill=white)
+            d.rectangle((11, 17, 13, 24), fill=(113, 43, 51))
+            d.rectangle((6, 20, 8, 23), fill=seam)
+            d.rectangle((16, 20, 18, 23), fill=seam)
+            d.rectangle((16, 18, 17, 19), fill=pin)
+            d.rectangle((8, 8 + bob, 16, 16 + bob), fill=sk, outline=edge)
+            d.rectangle((7, 6 + bob, 17, 11 + bob), fill=ha)
+            d.rectangle((7, 10 + bob, 9, 13 + bob), fill=ha)
+            d.rectangle((15, 10 + bob, 17, 13 + bob), fill=ha)
+            d.point((10, 12 + bob), fill=(31, 26, 31))
+            d.point((14, 12 + bob), fill=(31, 26, 31))
+            d.line((11, 15 + bob, 13, 15 + bob), fill=shade(sk, .70))
+        elif facing == "up":
+            d.polygon([(7, 14 + bob), (17, 14 + bob), (19, 27), (5, 27)], fill=co, outline=edge)
+            d.polygon([(6, 15), (9, 17), (7 + swing // 2, 24), (4, 24)], fill=co, outline=edge)
+            d.polygon([(18, 15), (15, 17), (17 - swing // 2, 24), (20, 24)], fill=co, outline=edge)
+            d.line((12, 16, 12, 27), fill=seam)
+            d.rectangle((7, 7 + bob, 17, 15 + bob), fill=ha, outline=edge)
+            d.rectangle((8, 6 + bob, 16, 10 + bob), fill=ha)
+            d.rectangle((9, 13 + bob, 15, 16 + bob), fill=shade(ha, .80))
+            d.rectangle((5, 18, 7, 23), fill=seam)
+            d.rectangle((17, 18, 19, 23), fill=seam)
+        else:
+            flip = facing == "left"
+            d.polygon([(8, 14 + bob), (16, 14 + bob), (17, 27), (7, 27)], fill=co, outline=edge)
+            d.polygon([(7, 17), (10, 17), (8 + swing // 2, 23), (5, 23)], fill=co, outline=edge)
+            d.polygon([(15, 17), (18, 17), (19, 23), (15 - swing // 2, 23)], fill=co, outline=edge)
+            d.rectangle((11, 15, 12, 24), fill=white)
+            d.rectangle((9, 8 + bob, 16, 15 + bob), fill=sk, outline=edge)
+            d.rectangle((8, 6 + bob, 16, 10 + bob), fill=ha)
+            d.rectangle((8, 9 + bob, 10, 14 + bob), fill=ha)
+            d.point((15, 12 + bob), fill=(24, 22, 27))
+            d.polygon([(16, 12 + bob), (19, 13 + bob), (16, 14 + bob)], fill=sk)
+            if flip:
+                im = im.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+                d = ImageDraw.Draw(im)
+        if hat:
+            # Everyone else wears a plain fedora; guards wear a very distinct
+            # navy peaked cap, golden stripe and visible brass shoulder patch.
+            if accessory == 3:
+                d.rectangle((5, 5 + bob, 19, 8 + bob), fill=(18, 39, 74), outline=(10, 18, 35))
+                d.rectangle((8, 2 + bob, 16, 7 + bob), fill=(22, 47, 83), outline=(10, 18, 35))
+                d.line((7, 7 + bob, 17, 7 + bob), fill=(238, 192, 99), width=2)
+                d.rectangle((16, 17, 19, 20), fill=(230, 185, 81))
+                d.rectangle((17, 18, 18, 19), fill=(65, 78, 104))
+            else:
+                d.rectangle((6, 6 + bob, 18, 8 + bob), fill=(28, 30, 38), outline=(13, 18, 27))
+                d.rectangle((9, 2 + bob, 15, 7 + bob), fill=(38, 37, 46), outline=(17, 19, 27))
+                d.line((9, 6 + bob, 15, 6 + bob), fill=(145, 100, 73))
+        if ghost:
+            a = im.getchannel("A")
+            a = a.point(lambda value: value // 2)
+            im.putalpha(a)
+        return im
+
+    def photo(self, coat, hair, skin, facing, walk, hat=False, accessory=0, zoom=3, ghost=False):
+        key = (coat, hair, skin, facing, walk, hat, accessory, zoom, ghost)
+        if key not in self.cache:
+            base = self.build(coat, hair, skin, facing, walk, hat, accessory, ghost=ghost)
+            base = base.resize((24 * zoom, 34 * zoom), Image.Resampling.NEAREST)
+            self.cache[key] = ImageTk.PhotoImage(base)
+        return self.cache[key]
+
+
+# -----------------------------------------------------------------------------
+# MAIN MENU ILLUSTRATION
+# A moody manor scene independent from the top-down world view: the title screen
+# echoes the reference's silhouettes, blue-black stone, glowing windows, moon,
+# rain, trees, and paved reflections.
+# -----------------------------------------------------------------------------
+
+class TitleIllustration:
+    def __init__(self):
+        self.rng = random.Random(112233)
+
+    def render(self):
+        w, h = 584, 388
+        im = Image.new("RGB", (w, h), (6, 17, 35))
+        d = ImageDraw.Draw(im)
+        for y in range(h):
+            blue = clamp(26 + int(13 * math.sin(y / 106)) - y // 38, 7, 44)
+            d.line((0, y, w, y), fill=(7, 15 + blue // 5, blue + 16))
+        for i in range(110):
+            x = self.rng.randrange(w)
+            y = self.rng.randrange(226)
+            d.rectangle((x, y, x + 1, y + 1), fill=self.rng.choice([(53, 74, 123), (79, 93, 149), (116, 123, 173)]))
+        d.ellipse((414, 31, 476, 93), fill=(238, 206, 132), outline=(250, 224, 161), width=2)
+        for px, py, r in [(435, 48, 5), (457, 60, 7), (436, 74, 4)]:
+            d.ellipse((px-r, py-r, px+r, py+r), fill=(218, 188, 120))
+        for i in range(9):
+            xx = i * 70 - 22
+            yy = 142 + (i % 3) * 18
+            d.polygon([(xx-18, yy+31), (xx+17, yy-25), (xx+56, yy+31)], fill=(12, 26, 51))
+            d.rectangle((xx-18, yy+30, xx+56, 259), fill=(14, 29, 52))
+
+        # Each block is a complete facade at its own depth. Roofs and wall
+        # details are painted BEFORE the windows. Owner masks identify the
+        # unobscured rectangle fragments: no cropped / hanging windows.
+        buildings = [
+            (50, 143, 158, 301, 0),
+            (145, 112, 302, 312, 1),
+            (278, 124, 430, 310, 0),
+            (407, 150, 531, 304, 0),
+            (230, 78, 329, 306, 2),
+        ]
+        owner = Image.new("I", (w, h), -1)
+        od = ImageDraw.Draw(owner)
+        for index, (x1, y1, x2, y2, kind) in enumerate(buildings):
+            roof = y1 - (27 if kind != 2 else 42)
+            stone = (20 + kind * 3, 36 + kind * 4, 65 + kind * 3)
+            d.rectangle((x1, y1, x2, y2), fill=stone, outline=(40, 61, 89), width=1)
+            od.rectangle((x1, y1, x2, y2), fill=index)
+            d.polygon([(x1-13, y1+3), ((x1+x2)//2, roof), (x2+13, y1+3)], fill=(18, 32, 61), outline=(45, 63, 101))
+            od.polygon([(x1-13, y1+3), ((x1+x2)//2, roof), (x2+13, y1+3)], fill=-1)
+            # Restrained masonry marks, none drawn across a window later.
+            for yy in range(y1+15, y2-10, 20):
+                for xx in range(x1+8, x2-8, 32):
+                    if self.rng.random() < .58:
+                        d.line((xx, yy, xx + 10, yy), fill=(35, 52, 77))
+        owners = owner.load()
+        for index, (x1, y1, x2, y2, kind) in enumerate(buildings):
+            pane_w, pane_h = 21, 34
+            for xx in range(x1+11, x2-pane_w-9, 37):
+                for yy in range(y1+25, y2-pane_h-13, 52):
+                    # The full frame and a two-pixel safety zone must be
+                    # owned by the same facade at this exact depth.
+                    pts = [
+                        (xx-3, yy-3), (xx+pane_w+3, yy-3),
+                        (xx-3, yy+pane_h+3), (xx+pane_w+3, yy+pane_h+3),
+                        (xx + pane_w//2, yy+pane_h//2),
+                    ]
+                    if any(not (0 <= ax < w and 0 <= ay < h) or owners[ax, ay] != index for ax, ay in pts):
+                        continue
+                    lit = self.rng.random() < .86
+                    frame = (61, 64, 73)
+                    glow = (231, 173, 77) if lit else (10, 20, 41)
+                    d.rectangle((xx, yy, xx+pane_w, yy+pane_h), fill=glow, outline=frame, width=2)
+                    d.line((xx+10, yy+2, xx+10, yy+pane_h-2), fill=(81, 64, 60), width=2)
+                    d.line((xx+1, yy+17, xx+pane_w-1, yy+17), fill=(81, 64, 60), width=2)
+                    if lit:
+                        d.rectangle((xx+4, yy+4, xx+7, yy+8), fill=(252, 213, 126))
+        # Door and garden steps are in the foreground of the frontage.
+        d.rectangle((254, 251, 300, 322), fill=(80, 51, 43), outline=(145, 99, 65), width=2)
+        d.rectangle((263, 263, 291, 313), fill=(191, 131, 76), outline=(224, 164, 100), width=2)
+        d.ellipse((287, 285, 291, 289), fill=(247, 216, 148))
+        for yy in range(316, 331, 5):
+            d.rectangle((244-(yy-316), yy, 309+(yy-316), yy+2), fill=(62, 68, 83))
+        d.polygon([(245, 322), (315, 322), (416, 387), (136, 387)], fill=(23, 38, 58))
+        for yy in range(328, 386, 9):
+            offset = self.rng.randrange(-21, 22)
+            d.line((277-(yy-320)*2+offset, yy, 279+(yy-320)*2+offset, yy), fill=(43, 67, 87))
+            if self.rng.random() < .62:
+                d.line((269+offset, yy+2, 289+offset, yy+2), fill=(147, 117, 74))
+        for tx, ty, sc in [(26, 345, 1.3), (559, 344, 1.2), (75, 355, .8), (508, 354, .8)]:
+            d.line((tx, ty, tx-5, ty-113*sc), fill=(12, 24, 41), width=9)
+            for k in range(5):
+                ry = ty-30-k*20*sc
+                d.line((tx, ry, tx-30+8*k, ry-25), fill=(15, 28, 47), width=6)
+                d.line((tx, ry, tx+34-6*k, ry-23), fill=(15, 28, 47), width=6)
+                for j in range(6):
+                    px = tx+self.rng.randint(-36, 36)
+                    py = ry+self.rng.randint(-24, 9)
+                    d.rectangle((px, py, px+9, py+7), fill=self.rng.choice([(12, 29, 45), (15, 37, 54), (18, 43, 60)]))
+        for _ in range(42):
+            rx, ry = self.rng.randrange(180, 396), self.rng.randrange(322, 387)
+            if abs(rx - 278) < (ry - 310) * 1.7:
+                d.line((rx, ry, rx+self.rng.randrange(3, 23), ry), fill=self.rng.choice([(98, 90, 76), (141, 111, 71), (64, 85, 105)]))
+        return im
+
+class BlackwellGame:
+    def __init__(self, root: tk.Tk):
+        self.root = root
+        root.title("Blackwell: Into the Shadows")
+        root.configure(bg=C["black"])
+        root.geometry(f"{SW}x{SH}")
+        root.minsize(SW, SH)
+        root.resizable(False, False)
+        self.canvas = tk.Canvas(root, width=SW, height=SH, bg=C["black"], highlightthickness=0)
+        self.canvas.pack()
+        self.font_small = "Courier New"
+        self.font_title = "Georgia"
+        self.buttons: list[tuple[tuple[float, float, float, float], Callable]] = []
+        self.mouse = (-100, -100)
+        self.mouse_world = None
+        self.held: set[str] = set()
+        self.release_jobs: dict[str, str] = {}
+        self.click_destination: Optional[tuple[float, float]] = None
+        self.click_path = []
+        self.guard_path = []
+        self.guard_path_goal = None
+        self.guard_route_refresh = 0.0
+        self.screen = "menu"
+        self.overlay = None
+        self.screen_return = None
+        self.avatar = {"name": "Jack", "skin": 0, "hair": 0, "coat": 1, "hat": 0, "accessory": 0}
+        self.unlocked = 0
+        self.chapter = 0
+        self.finished = False
+        self.progress: dict[str, dict] = {}
+        self.seen: set[int] = set()
+        self.notes: set[int] = set()
+        self.solved: set[int] = set()
+        self.witness_spoken = False
+        self.wrong_attempts = 0
+        self.hush = 0.0
+        self.world = make_level(0)
+        self.room_index = 0
+        self.secret_unlocked = False
+        self.room_positions = {}
+        self.room_art_cache = OrderedDict()
+        self.transition_to = None
+        self.transition_from = 0
+        self.transition_time = 0.0
+        self.transition_started_at = 0.0
+        self.transition_switched = False
+        self.transition_duration = 1.7
+        self.player = Agent(*self.world.start)
+        self.guard = Agent(248, 250, "right", coat=1, hair=2, skin=0, hat=True)
+        self.watchmen: list[PatrolGuard] = []
+        self.guard_patrol_idx = 0
+        self.guard_mode = "patrol"
+        self.guard_alert = 0.0
+        self.guard_search = 0.0
+        self.guard_last_seen = None
+        self.patrol_pause = 0.0
+        self.exposure = 0.0
+        self.hidden = False
+        self.blending = False
+        self.crouched = False
+        self.running = False
+        self.focus = False
+        self.case_ready = False
+        self.disguise = None  # None / "staff" / "guest"
+        self.cover_blown = False
+        self.scrutiny = 0.0
+        self.coins = 3
+        self.decoy = None
+        self.decoy_expire = 0.0
+        self.infiltration_uncovered = False
+        self.restricted_warning_at = -9.0
+        self.cam_x = 0.0
+        self.cam_y = 0.0
+        self.world_raw = None
+        self.world_photo = None
+        self.world_pil = None
+        self.scene_lights = []
+        self.dynamic_lights = []
+        self.title_photo = None
+        self.title_pil = None
+        self.thumbnails: dict[int, ImageTk.PhotoImage] = {}
+        self.sprite_factory = SpriteFactory()
+        self.icons = IconLibrary()
+        self.ambient = AmbientParticles(0)
+        self.flash_timer = 0.0
+        self.toast_text = ""
+        self.toast_timer = 0.0
+        self.alert_caption = ""
+        self.alert_caption_timer = 0.0
+        self.time_alive = 0.0
+        self.tick_count = 0
+        self._last_chrome_signature = None
+        self._chrome_updated_at = 0.0
+        self._world_nodes = {}
+        self._world_particles = {}
+        self._scene_emitters = {}
+        self._world_alerts = {}
+        self._world_sparkle = []
+        self._world_decoy = []
+        self._focus_was_active = False
+        self.last_tick = time.perf_counter()
+        self.cutscene_step = 0
+        self.dialogue_step = 0
+        self.confront_step = 0
+        self.deduction_chosen = None
+        self.case_transitions = 0
+        self.end_grade = ""
+        self.ui_scroll = 0
+        self.name_entry: Optional[tk.Entry] = None
+        self.focus_button = 0
+        self.name_entry_open = False
+        self.particles = [(random.Random(i * 121 + 5).randrange(584), random.Random(i * 312 + 7).randrange(388)) for i in range(65)]
+        self.load()
+        self.make_title()
+        self.prepare_chapter(self.chapter, reset=False)
+        self.screen = "menu"
+        root.bind("<KeyPress>", self.key_down)
+        root.bind("<KeyRelease>", self.key_up)
+        root.bind("<Button-1>", self.click)
+        root.bind("<Motion>", self.motion)
+        root.bind("<MouseWheel>", self.wheel)
+        root.bind("<FocusOut>", lambda ev: self.clear_held())
+        root.protocol("WM_DELETE_WINDOW", self.quit)
+        self.redraw()
+        self.root.after(int(STEP_INTERVAL * 1000), self.update)
+
+    # -------- data and files --------
+    def save(self):
+        self.cache_progress()
+        data = {
+            "version": VERSION,
+            "avatar": self.avatar,
+            "unlocked": self.unlocked,
+            "chapter": self.chapter,
+            "finished": self.finished,
+            "progress": self.progress,
+        }
+        try:
+            SAVE_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except OSError:
+            pass
+
+    def cache_progress(self):
+        if self.screen not in {"game", "menu", "profile", "select", "help"}:
+            return
+        self.progress[str(self.chapter)] = {
+            "seen": sorted(self.seen),
+            "solved": sorted(self.solved),
+            "notes": sorted(self.notes),
+            "witness_spoken": self.witness_spoken,
+            "wrong_attempts": self.wrong_attempts,
+            "disguise": self.disguise,
+            "cover_blown": self.cover_blown,
+            "coins": self.coins,
+            "infiltration_uncovered": self.infiltration_uncovered,
+            "player": [int(self.player.x), int(self.player.y)],
+            "room": self.room_index,
+            "secret_unlocked": self.secret_unlocked,
+            "room_positions": {str(k): list(v) for k, v in self.room_positions.items()},
+        }
+
+    def load(self):
+        data = None
+        for path in (SAVE_FILE, OLD_SAVE_FILE):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                break
+            except (OSError, ValueError, TypeError):
+                continue
+        if not isinstance(data, dict):
+            return
+        old_avatar = data.get("avatar", {})
+        if isinstance(old_avatar, dict):
+            self.avatar.update({key: value for key, value in old_avatar.items() if key in self.avatar})
+        self.unlocked = int(clamp(data.get("unlocked", 0), 0, 9))
+        self.chapter = int(clamp(data.get("chapter", 0), 0, self.unlocked))
+        self.finished = bool(data.get("finished", False))
+        self.progress = data.get("progress", {}) if isinstance(data.get("progress", {}), dict) else {}
+        if not SAVE_FILE.exists():
+            # Smoothly migrate from the previous prototype save format.
+            self.progress = {}
+
+    def prepare_chapter(self, number, reset=False):
+        self.chapter = int(clamp(number, 0, 9))
+        self.world = make_room(self.chapter, 0)
+        self.room_art_cache = OrderedDict()
+        self.nav = NavigationGrid(self.world)
+        self._scene_ready = False
+        self._background_id = None
+        self.click_path = []
+        self.guard_path = []
+        self.guard_path_goal = None
+        self.guard_route_refresh = 0.0
+        self.ambient = AmbientParticles(self.chapter)
+        state = {} if reset else self.progress.get(str(self.chapter), {})
+        self.seen = set(int(v) for v in state.get("seen", []) if 0 <= int(v) < 3)
+        self.notes = set(int(v) for v in state.get("notes", []) if 0 <= int(v) < 3)
+        self.solved = set(int(v) for v in state.get("solved", []) if 0 <= int(v) < 3)
+        self.witness_spoken = bool(state.get("witness_spoken", False))
+        self.wrong_attempts = int(state.get("wrong_attempts", 0))
+        self.disguise = state.get("disguise") if state.get("disguise") in {"staff", "guest"} else None
+        self.cover_blown = bool(state.get("cover_blown", False))
+        self.scrutiny = 0.0
+        self.coins = int(clamp(state.get("coins", 3), 0, 5))
+        self.decoy = None
+        self.decoy_expire = 0.0
+        self.infiltration_uncovered = bool(state.get("infiltration_uncovered", False))
+        self.secret_unlocked = bool(state.get("secret_unlocked", False))
+        self.room_index = 0
+        self.room_positions = {int(k): v for k, v in state.get("room_positions", {}).items() if k in {"0", "1", "2"}}
+        self.restricted_warning_at = -9.0
+        x, y = state.get("player", self.world.start)
+        x, y = find_nearest_open(self.world, (float(x), float(y)))
+        self.player = Agent(float(x), float(y), coat=int(self.avatar["coat"]), hair=int(self.avatar["hair"]), skin=int(self.avatar["skin"]), hat=bool(self.avatar["hat"]), accessory=int(self.avatar["accessory"]))
+        gx, gy = find_nearest_open(self.world, (270, 247))
+        self.guard = Agent(gx, gy, "right", coat=1, hair=2, skin=0, hat=True, accessory=3)
+        # Two recognizable security uniforms. The first walks a deliberate
+        # clockwise route near the private records. The second is a more
+        # perceptive enforcer stationed inside, with its own short patrol.
+        outer_route = [find_nearest_open(self.world, pt) for pt in self.world.patrol]
+        entry = find_nearest_open(self.world, outer_route[0])
+        self.guard.x, self.guard.y = entry
+        inner_route = [find_nearest_open(self.world, pt) for pt in
+                       [(402, 124), (470, 124), (470, 162), (404, 162)]]
+        inner = Agent(*inner_route[0], "left", coat=1, hair=2, skin=1, hat=True, accessory=3)
+        self.watchmen = [
+            PatrolGuard(self.guard, outer_route, "security"),
+            PatrolGuard(inner, inner_route, "enforcer"),
+        ]
+        self.guard_patrol_idx = 0
+        self.guard_mode = "patrol"
+        self.guard_alert = 0.0
+        self.guard_search = 0.0
+        self.guard_last_seen = None
+        self.exposure = 0.0
+        self.hidden = False
+        self.blending = False
+        self.crouched = False
+        self.running = False
+        self.case_ready = False
+        self.click_destination = None
+        self.last_tick = time.perf_counter()
+        self.world_pil = None
+        self.world_photo = None
+        self.scene_lights = []
+        self.cam_x = clamp(self.player.x - VISIBLE_W / 2, 0, WORLD_W - VISIBLE_W)
+        self.cam_y = clamp(self.player.y - VISIBLE_H / 2, 0, WORLD_H - VISIBLE_H)
+        self.overlay = None
+        self.cutscene_step = 0
+        self.dialogue_step = 0
+        self.confront_step = 0
+        self.focus = False
+        self.clear_held()
+        target_room = int(state.get("room", 0)) if not reset else 0
+        self.switch_room(target_room if target_room in (0, 1, 2) else 0, arriving=True)
+
+    def room_portals(self):
+        # Transitions are attached to architectural features, not to unrelated
+        # dark squares in the middle of an otherwise identical room.
+        if self.room_index == 0:
+            return [("staff", (506, 214), "Open the service door"),
+                    ("secret", find_nearest_open(self.world, SECRET_FEATURES[self.chapter][0]),
+                     "Inspect " + SECRET_FEATURES[self.chapter][1])]
+        if self.room_index == 1:
+            return [("hall", (48, 209), "Return through the service door")]
+        return [("hall", (276, 321), "Climb the concealed stair")]
+
+    def secret_requirements_met(self):
+        # The detective recognizes the pull-ring only after comparing soot,
+        # the altered timeline, and the witness account. The fireplace is
+        # still a physical fireplace, not a menu disguised as a hatch.
+        return 0 in self.seen and 1 in self.seen and self.witness_spoken
+
+    def portal_nearby(self):
+        for key, pos, description in self.room_portals():
+            if distance(self.player.feet, pos) < 35:
+                return key, pos, description
+        return None
+
+    def refresh_room_art(self):
+        cache_key = (self.chapter, self.room_index, bool(self.secret_unlocked) if self.room_index == 0 else False)
+        if cache_key not in self.room_art_cache:
+            painter = RoomPainter(self.chapter, self.room_index,
+                                  hearth_open=self.secret_unlocked)
+            image = painter.render_room(self.world)
+            scaled = image.resize((WORLD_W * PIXEL_SCALE, WORLD_H * PIXEL_SCALE), Image.Resampling.NEAREST)
+            self.room_art_cache[cache_key] = (image, ImageTk.PhotoImage(scaled), painter.lights)
+        self.room_art_cache.move_to_end(cache_key)
+        self.world_pil, self.world_photo, self.scene_lights = self.room_art_cache[cache_key]
+        # Tk photos are native allocations, not just lightweight Python refs.
+        # Keep the current and last few rooms, not every room from ten cases.
+        while len(self.room_art_cache) > 4:
+            self.room_art_cache.popitem(last=False)
+
+    def switch_room(self, dest, arriving=False):
+        if not arriving:
+            self.room_positions[self.room_index] = list(self.player.feet)
+        old_room = self.room_index
+        self.room_index = dest
+        self.world = make_room(self.chapter, dest)
+        self.nav = NavigationGrid(self.world)
+        # Every doorway has a matching destination threshold. In particular,
+        # the hidden passage enters BELOW the fireplace, not another hall.
+        secret_exit = find_nearest_open(self.world, SECRET_FEATURES[self.chapter][0])
+        door_spawns = {0: (486, 213) if old_room == 1 else secret_exit,
+                       1: (56, 209), 2: (278, 319)}
+        spawn = self.room_positions.get(dest, door_spawns[dest]) if arriving else door_spawns[dest]
+        self.player.x, self.player.y = find_nearest_open(self.world, spawn)
+        self.player.vx = self.player.vy = 0
+        self.click_destination = None
+        self.click_path = []
+        self.hidden = self.blending = False
+        self.exposure = 0
+        if dest == 1:
+            self.watchmen = [
+                PatrolGuard(Agent(*self.world.patrol[0], "right", coat=1, hair=2, skin=0,
+                                  hat=True, accessory=3), list(self.world.patrol), "security"),
+                PatrolGuard(Agent(418, 145, "left", coat=1, hair=2, skin=1,
+                                  hat=True, accessory=3), [(358,151),(468,151),(470,197),(359,197)], "enforcer"),
+            ]
+            for g in self.watchmen:
+                g.actor.x, g.actor.y = find_nearest_open(self.world, g.actor.feet)
+                g.route = [find_nearest_open(self.world, pos) for pos in g.route]
+        else:
+            self.watchmen = []
+        self.guard_path = []
+        self.guard_path_goal = None
+        self._scene_ready = False
+        self._background_id = None
+        self.refresh_room_art()
+        self.cam_x = clamp(self.player.x - VISIBLE_W / 2, 0, WORLD_W - VISIBLE_W)
+        self.cam_y = clamp(self.player.y - VISIBLE_H / 2, 0, WORLD_H - VISIBLE_H)
+        if not arriving:
+            if dest not in self.room_positions:
+                self.show_caption(ROOM_MOODS[self.chapter][dest], duration=5.5)
+            self.save()
+        self.redraw()
+
+    def begin_room_transition(self, dest, action):
+        self.transition_to = dest
+        self.transition_from = self.room_index
+        self.transition_time = 0.0
+        self.transition_started_at = time.perf_counter()
+        self.transition_switched = False
+        self.transition_action = action
+        self.overlay = "room_transition"
+        self.clear_held()
+        self.redraw()
+
+    def use_portal(self, key):
+        if key == "secret":
+            if not self.secret_unlocked:
+                if not self.secret_requirements_met():
+                    if 0 in self.seen and 1 in self.seen:
+                        self.show_caption("The scratches suggest a moving panel. The witness may know what shifted it.")
+                    else:
+                        self.show_caption("The fitting looks unusual, but you cannot yet see what it operates.")
+                    return
+                self.secret_unlocked = True
+                self.room_art_cache.pop((self.chapter, 0, True), None)
+                self.refresh_room_art()
+                self.show_caption(SECRET_FEATURES[self.chapter][2])
+            self.begin_room_transition(2, "descend")
+        elif key == "staff":
+            self.begin_room_transition(1, "door")
+        elif key == "hall":
+            self.begin_room_transition(0, "ascend" if self.room_index == 2 else "door")
+
+    def draw_room_transition(self):
+        self.canvas.delete("room_transition_fx")
+        t = clamp(self.transition_time / self.transition_duration, 0.0, 1.0)
+        # Animated vignette and overhead stone staircase. The detective moves
+        # down the steps in discrete pixel frames as the room changes behind it.
+        self.canvas.create_rectangle(0, 0, SW, SH, fill="#06111b", outline="",
+                                     tags="room_transition_fx")
+        mx, my = SW // 2, SH // 2
+        self.canvas.create_rectangle(mx-263, my-213, mx+263, my+213,
+                                     fill="#111b29", outline="#78624d", width=3,
+                                     tags="room_transition_fx")
+        for j in range(12):
+            yy=my-188+j*32
+            left=mx-181+j//3*5
+            right=mx+181-j//3*5
+            color = "#39414b" if (j+t*12)%3 < 1 else "#2c3540"
+            self.canvas.create_rectangle(left, yy, right, yy+28, fill=color,
+                                         outline="#62707a", width=2, tags="room_transition_fx")
+            self.canvas.create_line(left+18, yy+5, right-18, yy+5, fill="#7a716c",
+                                    tags="room_transition_fx")
+        py = my-159 + t*310 if self.transition_action == "descend" else my+143-t*305
+        px = mx+int(5*math.sin(self.time_alive*8))
+        self.canvas.create_oval(px-12, py-12, px+12, py+10, fill="#172331", outline="#9b7558",
+                                tags="room_transition_fx")
+        self.canvas.create_rectangle(px-8,py-27,px+8,py-8,fill="#634654",outline="#211c26",
+                                     tags="room_transition_fx")
+        self.canvas.create_oval(px-7,py-43,px+7,py-25,fill="#d4aa8a",outline="#342d33",
+                                tags="room_transition_fx")
+        title = "THE HIDDEN WAY" if self.transition_action in {"descend", "ascend"} else "BEYOND THE DOOR"
+        sub = (SECRET_FEATURES[self.chapter][2]
+               if self.transition_action == "descend" else
+               "Footsteps echo upwards. The concealed panel slides shut behind you."
+               if self.transition_action == "ascend" else
+               "The lock turns. A different part of the building waits beyond.")
+        self.canvas.create_text(mx, 124, text=title, fill=C["gold"],
+                                font=(self.font_title, 29, "bold"), tags="room_transition_fx")
+        self.canvas.create_text(mx, 736, text=sub, fill=C["ivory"],
+                                font=(self.font_small, 14), tags="room_transition_fx")
+
+    def make_title(self):
+        self.title_pil = TitleIllustration().render()
+        scale = 2
+        doubled = self.title_pil.resize((self.title_pil.width * scale, self.title_pil.height * scale), Image.Resampling.NEAREST)
+        self.title_photo = ImageTk.PhotoImage(doubled)
+
+    def start_game(self, chapter=None, new=False):
+        if new:
+            self.unlocked = 0
+            self.finished = False
+            self.progress = {}
+            chapter = 0
+        else:
+            self.cache_progress()
+        idx = self.chapter if chapter is None else int(chapter)
+        self.prepare_chapter(idx, reset=new)
+        self.screen = "game"
+        if new or not self.progress.get(str(idx), {}).get("seen"):
+            self.cutscene_step = 0
+            self.overlay = "cinematic"
+        self.save()
+        self.redraw()
+
+    def return_menu(self):
+        self.clear_held()
+        self.hide_entry()
+        self.save()
+        self.overlay = None
+        self.screen = "menu"
+        self.screen_return = None
+        self.redraw()
+
+    def quit(self):
+        self.save()
         self.root.destroy()
 
-    def run(self):
-        self.root.mainloop()
+    # -------- drawing helpers --------
+    def rect(self, x1, y1, x2, y2, fill, outline="", width=1):
+        return self.canvas.create_rectangle(x1, y1, x2, y2, fill=fill, outline=outline, width=width)
 
-    def reset_decor(self):
-        rng = random.Random(910+self.world.level_id*37)
-        self.decor = [(rng.random()*NX,rng.random()*NY,rng.random(),rng.random()*math.tau) for _ in range(310)]
+    def line(self, *coords, fill=None, width=1, smooth=False, dash=None):
+        return self.canvas.create_line(*coords, fill=fill or C["thin"], width=width, smooth=smooth, dash=dash)
 
-    def logical(self,event):
-        return (event.x-self.offset[0])/self.scale,(event.y-self.offset[1])/self.scale
+    def text(self, x, y, content, size=13, color=None, width=None, bold=False, anchor="nw", serif=False, spacing1=0):
+        return self.canvas.create_text(
+            x, y,
+            text=content,
+            fill=color or C["ivory"],
+            font=(self.font_title if serif else self.font_small, size, "bold" if bold else "normal"),
+            width=width,
+            anchor=anchor,
+        )
 
-    def motion(self,event):
-        self.hover = self.logical(event)
+    def frame_box(self, x1, y1, x2, y2, fill=None, border=None, inner=True):
+        self.rect(x1, y1, x2, y2, fill or C["panel"], border or C["edge"], 2)
+        if inner:
+            self.rect(x1 + 4, y1 + 4, x2 - 4, y2 - 4, fill or C["panel"], C["thin"])
+            for x in (x1 + 10, x2 - 10):
+                for y in (y1 + 10, y2 - 10):
+                    self.rect(x - 2, y - 2, x + 2, y + 2, C["gold_dim"])
 
-    def point(self,pos):
-        unit = TILE*self.camera.zoom
-        x = LEFT+VIEW_W/2+(pos[0]-self.camera.x)*unit
-        y = TOP+VIEW_H/2+(pos[1]-self.camera.y)*unit
-        return x,y
+    def button(self, x, y, w, h, label, callback, enabled=True, primary=False, size=13):
+        hover = x <= self.mouse[0] <= x + w and y <= self.mouse[1] <= y + h
+        fill = C["panel_high"] if enabled else C["panel"]
+        if hover and enabled:
+            fill = "#233f5b"
+        stroke = C["gold"] if primary and enabled else C["edge"]
+        if not enabled:
+            stroke = C["thin"]
+        self.rect(x, y, x + w, y + h, fill, stroke, 2 if primary else 1)
+        if primary:
+            self.rect(x + 4, y + 4, x + w - 4, y + h - 4, fill, C["gold_dim"])
+        self.text(x + w / 2, y + h / 2, label, size, C["ivory"] if enabled else C["muted"], bold=primary, anchor="center")
+        if enabled:
+            self.buttons.append(((x, y, x + w, y + h), callback))
 
-    def visible(self,pos,padding=1.4):
-        x,y = self.point(pos)
-        pad = padding*TILE*self.camera.zoom
-        return LEFT-pad<=x<=LEFT+VIEW_W+pad and TOP-pad<=y<=TOP+VIEW_H+pad
-
-    def rect(self,x,y,w,h,fill,outline='',width=1):
-        return self.canvas.create_rectangle(x,y,x+w,y+h,fill=fill,outline=outline,width=width*self.scale)
-
-    def oval(self,x,y,w,h,fill,outline='',width=1):
-        return self.canvas.create_oval(x,y,x+w,y+h,fill=fill,outline=outline,width=width*self.scale)
-
-    def line(self,points,color,width=1,**options):
-        return self.canvas.create_line(*[v for p in points for v in p],fill=color,width=width*self.scale,**options)
-
-    def polygon(self,points,fill,outline='',width=1,smooth=False):
-        return self.canvas.create_polygon(*[v for p in points for v in p],fill=fill,outline=outline,
-                                          width=width*self.scale,smooth=smooth,splinesteps=8)
-
-    def roundrect(self,x,y,w,h,fill,outline='',r=10,width=1):
-        r = min(r,w/2,h/2)
-        points = [(x+r,y),(x+w-r,y),(x+w,y),(x+w,y+r),(x+w,y+h-r),(x+w,y+h),
-                  (x+w-r,y+h),(x+r,y+h),(x,y+h),(x,y+h-r),(x,y+r),(x,y)]
-        return self.polygon(points,fill,outline,width,True)
-
-    def gradient(self,x,y,w,h,top,bottom,steps=18):
-        for i in range(steps):
-            self.rect(x,y+h*i/steps,w,h/steps+1,tint(top,bottom,i/max(1,steps-1)))
-
-    def text(self,x,y,message,size=12,color='#ebf2e9',bold=False,anchor='nw',width=None):
-        options = {'text':str(message),'fill':color,'font':('Helvetica',max(8,round(size*self.scale)),'bold' if bold else 'normal'),'anchor':anchor}
-        if width:
-            options['width'] = width*self.scale
-        return self.canvas.create_text(x,y,**options)
-
-    def button(self,x,y,w,h,label,action,enabled=True,accent=None,size=11):
-        hot=enabled and x<=self.hover[0]<=x+w and y<=self.hover[1]<=y+h
-        key=str(action)
-        value=self.hover_values.get(key,0)
-        value+=((1 if hot else 0)-value)*.25
-        self.hover_values[key]=value
-        green=action[0] in ('levels','resume','close') or action[0]=='supply'
-        base=('#41934e' if green else '#286da2') if enabled else '#31546c'
-        top=tint(base,'#8dd7ed',.15+value*.2)
-        edge=accent or ('#b2e775' if green else '#73bce5')
-        lift=2*value
-        self.roundrect(x-1,y+5,w+2,h,'#10334f',r=11,width=2)
-        self.roundrect(x,y-lift,w,h,base,'#173d5b',r=11,width=2)
-        self.roundrect(x+3,y+2-lift,w-6,max(8,h*.48),top,r=8)
-        self.line([(x+11,y+4-lift),(x+w-11,y+4-lift)],edge if enabled else '#527087',1.5)
-        if accent:
-            self.roundrect(x+2,y+5-lift,4,h-10,accent,r=2)
-        self.text(x+12,y+h/2-lift,label,size,'#fff9df' if enabled else '#a5bac7',True,anchor='w')
-        self.buttons.append(((x,y,w,h),action,enabled))
-
-
-    def focus_out(self,event):
-        if event.widget is self.root:
-            self.keys.clear()
-            if self.state=='play':
-                self.paused = True
-
-    def cancel_blueprint(self,event=None):
-        self.blueprint = None
-
-    def change_zoom(self,delta):
-        if self.state=='play' and not self.panel and not self.paused:
-            self.camera.target_zoom = max(.75,min(1.4,self.camera.target_zoom+delta))
-
-    def wheel(self,event):
-        if LEFT<=self.hover[0]<=LEFT+VIEW_W:
-            self.change_zoom(.08 if event.delta>0 else -.08)
-
-    def key_down(self,event):
-        key = event.keysym.lower()
-        pending=getattr(self,'pending_releases',{})
-        if key in pending:
-            self.root.after_cancel(pending.pop(key))
-        if key in self.keys:
-            return
-        self.keys.add(key)
-        if self.transition:
-            return
-        if key=='f11':
-            self.fullscreen = not self.fullscreen
-            self.root.attributes('-fullscreen',self.fullscreen)
-            return
-        if self.state!='play':
-            if key=='escape':
-                self.state = 'title'
-            return
-        if key in ('escape','p'):
-            if self.panel:
-                self.panel = None
-            elif self.blueprint is not None and key=='escape':
-                self.blueprint = None
+    def progress_marks(self, x, y, complete, count=3, color=None):
+        for j in range(count):
+            col = color or C["gold"]
+            if j < complete:
+                self.canvas.create_polygon(x + j * 28, y + 8, x + j * 28 + 7, y, x + j * 28 + 14, y + 8, x + j * 28 + 7, y + 16, fill=col, outline=C["gold_dim"])
             else:
-                self.paused = not self.paused
-            self.keys.clear()
-            return
-        if self.paused or self.world.outcome:
-            return
-        if self.panel:
-            if key=='e':
-                self.panel=None
-                self.keys.clear()
-            return
-        if key=='space' and 'e' in self.keys:
-            self.world.precision_strike()
-        elif key=='e':
-            self.interact()
-        elif key=='f' and self.blueprint is not None:
-            self.world.start_construction(self.blueprint)
-        elif key=='b':
-            self.blueprint = None
-        elif key=='h':
-            self.panel = ('help',None)
-        elif key=='tab':
-            self.category = 'structures' if self.category=='robots' else 'robots'
-        elif key in tuple(str(i) for i in range(1,7)):
-            if self.category=='robots' and int(key)>4:return
-            index = int(key)-1+(12 if self.category=='structures' else getattr(self,'blueprint_page',0)*4)
-            if index<len(SPECS):
-                self.choose_blueprint(index)
+                self.canvas.create_oval(x + j * 28, y, x + j * 28 + 14, y + 14, outline=C["edge"])
 
-    def key_up(self,event):
-        key=event.keysym.lower()
-        def release():
-            self.keys.discard(key)
-            self.pending_releases.pop(key,None)
-        # X11 can report a release immediately before an autorepeated press.
-        # Deferring removal avoids stuttering movement or repeatedly opening E menus.
-        self.pending_releases[key]=self.root.after_idle(release)
+    def icon_draw(self, x, y, kind, zoom=3, dim=False, anchor="nw"):
+        img = self.icons.photo(kind, zoom=zoom, dim=dim)
+        self.canvas.create_image(x, y, image=img, anchor=anchor)
+
+    def moth(self, x, y, scale=1, color=None):
+        color = color or C["gold"]
+        self.canvas.create_polygon(x, y, x - 11 * scale, y - 5 * scale, x - 10 * scale, y + 6 * scale, x, y + 4 * scale, fill=color)
+        self.canvas.create_polygon(x, y, x + 11 * scale, y - 5 * scale, x + 10 * scale, y + 6 * scale, x, y + 4 * scale, fill=color)
+        self.canvas.create_polygon(x, y + 4 * scale, x - 7 * scale, y + 10 * scale, x - 2 * scale, y + 11 * scale, fill=color)
+        self.canvas.create_polygon(x, y + 4 * scale, x + 7 * scale, y + 10 * scale, x + 2 * scale, y + 11 * scale, fill=color)
+        self.line(x, y - 4 * scale, x, y + 10 * scale, fill=C["black"], width=max(1, scale))
+
+    def draw_outer_frame(self, title="", subtitle=""):
+        self.rect(0, 0, SW, SH, C["black"])
+        self.rect(12, 10, SW - 12, SH - 12, C["midnight"], C["edge"], 2)
+        self.line(26, 61, SW - 26, 61, fill=C["edge"], width=1)
+        if title:
+            self.text(30, 21, title, 21, C["ivory"], serif=True)
+        if subtitle:
+            self.text(30, 66, subtitle, 12, C["muted"])
+
+    def toast(self, message, duration=3.0):
+        self.toast_text = message
+        self.toast_timer = duration
+
+    def show_caption(self, message, duration=4.5):
+        self.alert_caption = message
+        self.alert_caption_timer = duration
+
+    def hide_entry(self):
+        if self.name_entry is not None and self.name_entry.winfo_exists():
+            self.name_entry.place_forget()
+        self.name_entry_open = False
+
+    def draw_title(self):
+        self.draw_outer_frame("BLACKWELL: INTO THE SHADOWS", "A TEN-CHAPTER NOIR MYSTERY")
+        # The hero art is deliberately given space; this is not a wall of menus.
+        self.canvas.create_image(30, 92, image=self.title_photo, anchor="nw")
+        self.rect(30, 92, 1197, 861, "", C["edge"], 2)
+        # Ambient rain composited in front of the painted mansion.
+        for i, (base_x, base_y) in enumerate(self.particles[:95]):
+            px = 30 + ((base_x * 2 + self.time_alive * (20 + i % 7 * 9)) % 1166)
+            py = 92 + ((base_y * 2 + self.time_alive * (71 + i % 9 * 9)) % 767)
+            self.line(px, py, px - 4, py + 10, fill="#476787", width=1)
+        # Dark panel on left gives the typography a legible silhouette.
+        self.rect(64, 153, 536, 786, "#091729", "#294560")
+        self.text(96, 190, "BLACKWELL", 46, C["ivory"], serif=True, bold=True)
+        self.text(98, 260, "INTO THE", 30, C["ivory"], serif=True, bold=True)
+        self.text(96, 310, "SHADOWS", 40, C["ivory"], serif=True, bold=True)
+        self.line(98, 364, 450, 364, fill=C["gold"], width=2)
+        self.text(100, 379, "Truth hides in the details.", 14, C["muted"])
+        self.button(96, 461, 310, 46, "CONTINUE", lambda: self.start_game(), primary=True)
+        self.button(96, 521, 310, 44, "NEW INVESTIGATION", lambda: self.start_game(0, True))
+        self.button(96, 578, 310, 44, "CHAPTER SELECT", lambda: self.open_screen("select"))
+        self.button(96, 635, 310, 44, "DETECTIVE PROFILE", lambda: self.open_screen("profile"))
+        self.button(96, 692, 310, 44, "SETTINGS / CONTROLS", lambda: self.open_screen("help"))
+        self.text(96, 740, "'Every clue has a story.\n Somebody is writing ours.'", 12, C["cyan"])
+        # Smaller file drawer instead of the previous wall of labels.
+        self.frame_box(1215, 92, 1412, 861, fill=C["panel"], inner=False)
+        self.moth(1307, 139, 2, C["gold"])
+        self.text(1237, 191, "CASE FILES", 16, C["gold"], serif=True)
+        for idx in range(10):
+            ch = CHAPTERS[idx]
+            y = 233 + idx * 56
+            col = C["ivory"] if idx <= self.unlocked else C["muted"]
+            self.text(1231, y, f"{roman(idx)}. {ch['title']}", 11, col, width=172)
+            if idx <= self.unlocked:
+                self.line(1232, y + 25, 1391, y + 25, fill=C["thin"])
+        self.text(1234, 807, f"{self.unlocked + 1} OF 10 OPEN", 10, C["cyan"])
+
+    def open_screen(self, screen):
+        if self.screen != screen:
+            self.screen_return = (self.screen, self.overlay)
+        self.hide_entry()
+        self.screen = screen
+        self.redraw()
+
+    def draw_chapter_select(self):
+        self.draw_outer_frame("CASE FILES", "Choose a chapter from the same unfolding investigation.")
+        for idx, ch in enumerate(CHAPTERS):
+            col, row = idx % 5, idx // 5
+            x = 42 + col * 281
+            y = 124 + row * 340
+            allowed = idx <= self.unlocked
+            fill = C["panel"] if allowed else "#0a1727"
+            border = C["gold"] if allowed and idx == self.chapter else C["edge"]
+            self.frame_box(x, y, x + 261, y + 316, fill, border, inner=False)
+            if idx not in self.thumbnails:
+                lev = make_level(idx)
+                full = PixelArt(idx).render(lev)
+                crop = full.crop((48, 53, 497, 265)).resize((248, 130), Image.Resampling.NEAREST)
+                if not allowed:
+                    crop = ImageEnhance.Brightness(crop).enhance(.42)
+                self.thumbnails[idx] = ImageTk.PhotoImage(crop)
+            self.canvas.create_image(x + 7, y + 8, image=self.thumbnails[idx], anchor="nw")
+            case_icon = ["moths", "ticket", "lock", "mask", "archive", "flower", "anchor", "globe", "scales", "candle"][idx]
+            self.icon_draw(x + 196, y + 152, case_icon, zoom=2, dim=not allowed)
+            self.text(x + 14, y + 158, f"CHAPTER {roman(idx)}", 11, C["cyan"] if allowed else C["muted"])
+            self.text(x + 14, y + 184, ch["title"], 17, C["ivory"] if allowed else C["muted"], serif=True, bold=True, width=234)
+            self.text(x + 14, y + 233, ch["place"], 11, C["muted"], width=234)
+            if allowed:
+                self.button(x + 13, y + 267, 232, 32, "OPEN CASE", lambda n=idx: self.start_game(n))
+            else:
+                self.text(x + 16, y + 277, "SEALED", 11, C["gold_dim"])
+        self.button(48, 808, 180, 40, "BACK", self.go_back)
+
+    def draw_profile(self):
+        self.draw_outer_frame("DETECTIVE PROFILE", "The person you create will carry every chapter of this story.")
+        self.frame_box(45, 108, 550, 773)
+        self.frame_box(579, 108, 1396, 773)
+        self.text(80, 143, "THE INVESTIGATOR", 17, C["gold"], serif=True)
+        self.sprite_preview(235, 263, zoom=8)
+        self.text(80, 579, self.avatar["name"], 22, C["ivory"], serif=True)
+        self.text(80, 621, "Sometimes the face in the case file\nis the last thing anyone remembers.", 12, C["muted"])
+        self.text(624, 149, "NAME", 12, C["gold"])
+        if self.name_entry is None or not self.name_entry.winfo_exists():
+            self.name_entry = tk.Entry(self.root, bg="#142942", fg=C["ivory"], font=(self.font_small, 18), relief="flat", insertbackground=C["gold"])
+        if not self.name_entry_open:
+            self.name_entry.delete(0, "end")
+            self.name_entry.insert(0, self.avatar["name"])
+        self.name_entry.place(x=624, y=185, width=395, height=43)
+        self.name_entry_open = True
+        for row, (title, key, options) in enumerate([
+            ("SKIN TONE", "skin", ["Warm", "Light", "Brown", "Deep"]),
+            ("HAIR", "hair", ["Chestnut", "Auburn", "Raven", "Silver"]),
+            ("COAT", "coat", ["Burgundy", "Midnight", "Olive", "Tobacco"]),
+            ("HAT", "hat", ["No hat", "Fedora"]),
+            ("ACCESSORY", "accessory", ["Brass", "Silver", "Red", "Jade"]),
+        ]):
+            y = 269 + row * 80
+            self.text(626, y, title, 13, C["gold"])
+            self.button(869, y - 3, 37, 31, "‹", lambda k=key: self.cycle_avatar(k, -1), size=18)
+            self.text(1000, y + 14, options[int(self.avatar[key]) % len(options)], 14, C["ivory"], anchor="center")
+            self.button(1098, y - 3, 37, 31, "›", lambda k=key: self.cycle_avatar(k, 1), size=18)
+        self.button(1125, 679, 217, 43, "CONFIRM PROFILE", self.confirm_profile, primary=True)
+        self.button(48, 808, 180, 40, "BACK", self.go_back)
+
+    def sprite_preview(self, x, y, zoom=8):
+        image = self.sprite_factory.photo(
+            int(self.avatar["coat"]), int(self.avatar["hair"]), int(self.avatar["skin"]),
+            "down", (self.tick_count // 6) % 6, bool(self.avatar["hat"]),
+            int(self.avatar["accessory"]), zoom=zoom,
+        )
+        self.canvas.create_image(x, y, image=image, anchor="n")
+
+    def cycle_avatar(self, key, delta):
+        if self.name_entry is not None and self.name_entry.winfo_exists():
+            self.avatar["name"] = self.name_entry.get().strip()[:22] or self.avatar["name"]
+        size = 2 if key == "hat" else 4
+        self.avatar[key] = (int(self.avatar[key]) + delta) % size
+        self.player.coat = int(self.avatar["coat"])
+        self.player.skin = int(self.avatar["skin"])
+        self.player.hair = int(self.avatar["hair"])
+        self.player.hat = bool(self.avatar["hat"])
+        self.player.accessory = int(self.avatar["accessory"])
+        self.save()
+        self.redraw()
+
+    def confirm_profile(self):
+        if self.name_entry is not None and self.name_entry.winfo_exists():
+            self.avatar["name"] = self.name_entry.get().strip()[:22] or "Detective"
+        self.hide_entry()
+        self.save()
+        self.return_menu()
+
+    def profile_return(self):
+        if self.name_entry is not None and self.name_entry.winfo_exists():
+            self.avatar["name"] = self.name_entry.get().strip()[:22] or "Detective"
+        self.hide_entry()
+        self.return_menu()
+
+    def draw_help(self):
+        self.draw_outer_frame("HOW TO PLAY", "A less cluttered interface. The evidence is in the world, not under floating letters.")
+        self.frame_box(60, 119, 927, 766)
+        self.frame_box(951, 119, 1380, 766)
+        self.text(95, 150, "CONTROLS", 22, C["gold"], serif=True)
+        instruction_rows = [
+            ("WASD / ARROWS", "Move freely through doors and around furniture."),
+            ("CTRL", "Move slowly and quietly. Guards still see you in open view."),
+            ("SPACE", "Continue dialogue and story moments."),
+            ("E", "Examine nearby physical evidence or speak to people."),
+            ("J", "Open your field journal and collected documents."),
+            ("TAB", "Open the evidence board and build real deductions."),
+            ("H", "Enter or leave nearby concealment."),
+            ("B", "Blend into a nearby small group if you move slowly."),
+            ("E / COATSTAND", "Choose a staff or guest disguise for infiltration."),
+            ("V", "Hold to preview each guard's line-of-sight patrol."),
+            ("Q", "Toss a coin to draw a guard toward its sound."),
+            ("ESC", "Close an overlay or return to the title screen."),
+            ("MOUSE", "Choose dialogue, evidence and destinations."),
+        ]
+        for j, (key, explanation) in enumerate(instruction_rows):
+            yy = 210 + j * 39
+            self.text(99, yy, key, 12, C["cyan"])
+            self.text(283, yy, explanation, 12, C["ivory"], width=565)
+        self.text(978, 150, "THE MYSTERY", 21, C["gold"], serif=True)
+        self.text(978, 212, wrapped(
+            "Walk into a room. Look at the clock, the footprints, the note. "
+            "Get close enough to study them; only then does the journal have a reason to remember them.", 37
+        ), 13, C["ivory"], width=357)
+        self.text(978, 370, wrapped(
+            "Your accusations require three distinct deductions. The truth is built by matching "
+            "evidence against plausible alternative explanations; clicking an unexplored clue proves nothing.", 37
+        ), 13, C["ivory"], width=357)
+        self.text(978, 557, wrapped(
+            "Inspect the public rooms without pressure. Navy-uniformed guards control the private offices. Watch their routes, wait for an opening, or wear staff clothing; experienced guards recognize strangers.", 37
+        ), 13, C["ivory"], width=357)
+        self.button(66, 802, 186, 40, "BACK", self.go_back)
+
+    # -------- world projection --------
+    def world_to_screen(self, wx, wy):
+        return (VIEW_X + (wx - self.cam_x) * PIXEL_SCALE,
+                VIEW_Y + (wy - self.cam_y) * PIXEL_SCALE)
+
+    def screen_to_world(self, sx, sy):
+        return (self.cam_x + (sx - VIEW_X) / PIXEL_SCALE,
+                self.cam_y + (sy - VIEW_Y) / PIXEL_SCALE)
+
+    def projected_sprite(self, agent, walking=None, ghost=False):
+        x, y = self.world_to_screen(agent.x, agent.y)
+        if not (VIEW_X - 90 <= x <= VIEW_X + VIEW_W + 90 and VIEW_Y - 120 <= y <= VIEW_Y + VIEW_H + 70):
+            return
+        frame = int(agent.frame) % 6 if walking is None else walking
+        coat, hat, accessory = agent.coat, agent.hat, agent.accessory
+        if agent is self.player and self.disguise and not self.cover_blown:
+            if self.disguise == "staff":
+                coat, hat, accessory = (self.chapter + 2) % len(COAT_SWATCHES), True, 1
+            else:
+                coat, hat, accessory = (self.chapter + 1) % len(COAT_SWATCHES), False, 2
+        img = self.sprite_factory.photo(coat, agent.hair, agent.skin, agent.facing,
+                                        frame, hat, accessory, PIXEL_SCALE, ghost)
+        self.canvas.create_image(x, y, image=img, anchor="s", tags="world_render")
+
+    def world_emitter(self, x, y, base=10, color="#b78751", alpha=False):
+        sx, sy = self.world_to_screen(x, y)
+        flicker = (math.sin(self.time_alive * 13 + x * .2) + 1) * 1.2
+        self.canvas.create_oval(sx - base - flicker, sy - base * .7, sx + base + flicker, sy + base * .7,
+                                outline=color, stipple="gray75", tags="world_render")
+
+    def world_sparkle(self, x, y):
+        sx, sy = self.world_to_screen(x, y)
+        glow = 2 + abs(math.sin(self.time_alive * 3)) * 4
+        col = C["gold"]
+        self.canvas.create_line(sx - glow, sy, sx + glow, sy, fill=col, tags="world_render")
+        self.canvas.create_line(sx, sy - glow, sx, sy + glow, fill=col, tags="world_render")
+
+    def _hud_signature(self):
+        """The sidebar changes only when visible information changes."""
+        nearby = self.nearest_object()
+        portal = self.portal_nearby()
+        return (self.chapter, self.room_index, len(self.seen), len(self.solved),
+                self.witness_spoken, self.disguise, self.cover_blown,
+                self.coins, self.hidden, self.blending, self.crouched,
+                round(self.exposure / 5), bool(self.toast_timer), self.toast_text if self.toast_timer else "",
+                bool(self.alert_caption_timer), self.alert_caption if self.alert_caption_timer else "",
+                nearby[0] if nearby else None, portal[0] if portal else None,
+                self.avatar['name'])
+
+    def draw_game_scene(self):
+        """Keep all moving canvas objects alive and move them in place.
+
+        Canvas item creation/deletion is relatively costly on macOS/Aqua Tk.
+        V8 rebuilt dozens of particles and sprites every frame; this version
+        allocates them once per room and changes only their coordinates.
+        """
+        first = (not getattr(self, "_scene_ready", False)
+                 or self.overlay is not None
+                 or not self.canvas.find_withtag("chrome"))
+        if first:
+            self.canvas.delete("all")
+            self._background_id = None
+            self._world_nodes = {}
+            self._world_particles = {}
+            self._scene_emitters = {}
+            self._world_alerts = {}
+            self._world_sparkle = []
+            self._world_decoy = []
+            self._focus_was_active = False
+            self._last_chrome_signature = None
+            self.buttons.clear()
+
+        self._render_world_layer()
+        signature = self._hud_signature()
+        if first or (signature != self._last_chrome_signature and
+                     self.time_alive - self._chrome_updated_at >= 0.22):
+            self.canvas.delete("chrome")
+            self.buttons.clear()
+            # Tag the newly drawn HUD once so subsequent frames keep it intact.
+            before = set(self.canvas.find_all())
+            self._render_game_chrome()
+            for item_id in self.canvas.find_all():
+                if item_id not in before:
+                    self.canvas.addtag_withtag("chrome", item_id)
+            self._last_chrome_signature = signature
+            self._chrome_updated_at = self.time_alive
+        self.canvas.tag_lower("world_background")
+        self.canvas.tag_lower("world_render", "chrome")
+        if self.overlay is not None:
+            self.buttons.clear()
+            self.draw_overlay()
+        self._scene_ready = self.overlay is None
+
+    def _move_particle(self, key, px, py, size, color, oval=False):
+        """Create only on first use; update coordinates during animation."""
+        x, y = self.world_to_screen(px, py)
+        if not (VIEW_X < x < VIEW_X + VIEW_W and VIEW_Y < y < VIEW_Y + VIEW_H):
+            x, y = -100, -100
+        if oval:
+            coords = (x - size, y - size, x + size, y + size)
+        else:
+            coords = (x, y, x + size, y + size)
+        item = self._world_particles.get(key)
+        if item is None:
+            if oval:
+                item = self.canvas.create_oval(*coords, fill=color, outline="", tags="world_render")
+            else:
+                item = self.canvas.create_rectangle(*coords, fill=color, outline="", tags="world_render")
+            self._world_particles[key] = item
+        else:
+            self.canvas.coords(item, *coords)
+
+    def _animate_particles(self):
+        # The atmosphere has its own low-frequency cadence. Character input
+        # and camera scrolling remain at the full simulation rate.
+        if self.tick_count % 3 != 0 and self._world_particles:
+            return
+        theme = THEMES[self.chapter]["name"]
+        elapsed = self.time_alive
+        if theme in {"manor", "hotel", "archive", "court", "crypt", "observatory"}:
+            for i, (wx, wy, sz, drift, bend) in enumerate(self.ambient.dust):
+                x = wx + math.sin(elapsed * .23 + i) * drift
+                y = wy + math.cos(elapsed * .31 + i * 1.8) * 11
+                self._move_particle(("dust", i), x, y, max(1, int(sz * PIXEL_SCALE)),
+                                    "#bd9664" if i % 4 == 0 else "#8b7c77")
+        if theme in {"manor", "theater", "archive", "crypt"}:
+            for i, (wx, wy, sz, phase) in enumerate(self.ambient.embers):
+                x = wx + math.sin(elapsed * (1 + phase) + i) * 8
+                y = wy - (elapsed * (5 + phase * 2) + i * 13) % 68
+                self._move_particle(("ember", i), x, y, sz,
+                                    "#d8a563" if i % 2 else "#9f624a")
+        if theme in {"greenhouse", "docks"}:
+            for i, (wx, wy, sz, phase) in enumerate(self.ambient.sparks):
+                x = wx + math.sin(elapsed * .8 + phase) * 7
+                y = wy + math.cos(elapsed * .9 + phase) * 9
+                radius = sz + .8 * math.sin(elapsed * 2 + i)
+                self._move_particle(("spark", i), x, y, radius,
+                                    "#97c5a5" if theme == "greenhouse" else "#5f91a4", oval=True)
+
+    def _set_world_sprite(self, agent, ghost=False):
+        x, y = self.world_to_screen(agent.x, agent.y)
+        if not (VIEW_X - 90 <= x <= VIEW_X + VIEW_W + 90 and
+                VIEW_Y - 120 <= y <= VIEW_Y + VIEW_H + 70):
+            entry = self._world_nodes.get(id(agent))
+            if entry is not None and not entry[2]:
+                self.canvas.itemconfigure(entry[0], state="hidden")
+                entry[2] = True
+            return
+        frame = int(agent.frame) % 6
+        coat, hat, accessory = agent.coat, agent.hat, agent.accessory
+        if agent is self.player and self.disguise and not self.cover_blown:
+            if self.disguise == "staff":
+                coat, hat, accessory = (self.chapter + 2) % len(COAT_SWATCHES), True, 1
+            else:
+                coat, hat, accessory = (self.chapter + 1) % len(COAT_SWATCHES), False, 2
+        state = (coat, agent.hair, agent.skin, agent.facing, frame, hat, accessory,
+                 PIXEL_SCALE, ghost)
+        key = id(agent)
+        entry = self._world_nodes.get(key)
+        if entry is None:
+            photo = self.sprite_factory.photo(*state[:4], state[4], state[5], state[6],
+                                              state[7], state[8])
+            item = self.canvas.create_image(x, y, image=photo, anchor="s", tags="world_render")
+            self._world_nodes[key] = [item, state, False]
+        else:
+            item, old_state, was_hidden = entry
+            self.canvas.coords(item, round(x), round(y))
+            if was_hidden:
+                self.canvas.itemconfigure(item, state="normal")
+                entry[2] = False
+            if old_state != state:
+                photo = self.sprite_factory.photo(*state[:4], state[4], state[5], state[6],
+                                                  state[7], state[8])
+                self.canvas.itemconfigure(item, image=photo)
+                entry[1] = state
+        # Actors are layered by their feet, so a detective can pass behind NPCs.
+        self.canvas.tag_raise(item)
+
+    def _render_world_layer(self):
+        bgx, bgy = self.world_to_screen(0, 0)
+        bgx, bgy = round(bgx), round(bgy)
+        if self._background_id is None:
+            self._background_id = self.canvas.create_image(
+                bgx, bgy, image=self.world_photo, anchor="nw", tags="world_background")
+        else:
+            self.canvas.coords(self._background_id, bgx, bgy)
+
+        self._animate_particles()
+        if self.room_index != 2:
+            for entry in self.world.props:
+                if entry[0] not in {"candle", "lantern", "fireplace"}:
+                    continue
+                x, y = self.world_to_screen(entry[1], entry[2])
+                r = 4 + (math.sin(self.time_alive * 13 + entry[1] * .2) + 1) * 1.2
+                key = (entry[1], entry[2])
+                item = self._scene_emitters.get(key)
+                coords = (x-r, y-r*.7, x+r, y+r*.7)
+                if item is None:
+                    self._scene_emitters[key] = self.canvas.create_oval(
+                        *coords, outline="#b78751", stipple="gray75", tags="world_render")
+                elif self.tick_count % 2 == 0:
+                    self.canvas.coords(item, *coords)
+
+        actors = [*([self.world.witness] if self.room_index == 0 else []),
+                  *([self.world.killer] if self.room_index == 1 else []),
+                  *self.world.civilians,
+                  *(guard.actor for guard in self.watchmen), self.player]
+        actors.sort(key=lambda actor: actor.y)
+        for actor in actors:
+            if actor in self.world.civilians:
+                actor.frame = self.time_alive * .4
+            self._set_world_sprite(actor, ghost=(actor is self.player and self.hidden))
+
+        for guard in self.watchmen:
+            key = id(guard)
+            mode = guard.mode
+            item = self._world_alerts.get(key)
+            if mode not in {"curious", "investigate", "search", "pursue"}:
+                if item is not None:
+                    self.canvas.itemconfigure(item, state="hidden")
+                continue
+            x, y = self.world_to_screen(guard.actor.x, guard.actor.y)
+            warning = "!" if mode == "pursue" else "?"
+            if item is None:
+                item = self.canvas.create_text(x, y-104, text=warning,
+                       font=(self.font_small, 19, "bold"), fill=C["red"] if warning == "!" else C["gold"], tags="world_render")
+                self._world_alerts[key] = item
+            else:
+                self.canvas.coords(item, x, y-104)
+                self.canvas.itemconfigure(item, text=warning,
+                       fill=C["red"] if warning == "!" else C["gold"], state="normal")
+
+        # Sightlines are optional; do not pay for them when the player is not
+        # holding V. Retain all non-focus objects through the next frame.
+        if self.focus:
+            self.canvas.delete("focus_fx")
+            for guard in self.watchmen:
+                self.draw_watchman_cone(guard)
+                route = [self.world_to_screen(*pt) for pt in guard.route]
+                for a, b in zip(route, route[1:] + route[:1]):
+                    self.canvas.create_line(*a, *b, fill="#657d94", dash=(2, 8),
+                                            tags=("world_render", "focus_fx"))
+            self._focus_was_active = True
+        elif self._focus_was_active:
+            self.canvas.delete("focus_fx")
+            self._focus_was_active = False
+
+        if self.decoy is not None and self.time_alive < self.decoy_expire:
+            x, y = self.world_to_screen(*self.decoy)
+            radius = 5 + 23 * max(0.0, 1 - (self.decoy_expire - self.time_alive) / 1.35)
+            if not self._world_decoy:
+                self._world_decoy = [
+                    self.canvas.create_oval(0,0,1,1, outline="#c9b478", dash=(3, 5), tags="world_render"),
+                    self.canvas.create_oval(0,0,1,1, fill="#d7c08a", outline="", tags="world_render")]
+            self.canvas.coords(self._world_decoy[0], x-radius, y-radius*.55, x+radius, y+radius*.55)
+            self.canvas.coords(self._world_decoy[1], x-3, y-2, x+3, y+2)
+            for item in self._world_decoy:
+                self.canvas.itemconfigure(item, state="normal")
+        elif self._world_decoy:
+            for item in self._world_decoy:
+                self.canvas.itemconfigure(item, state="hidden")
+
+        near = self.nearest_object()
+        visible = (near is not None and near[0].startswith("clue_") and
+                   int(near[0][5:]) not in self.seen and
+                   math.sin(self.time_alive * 5) > .45)
+        if visible:
+            _, xy, _ = near
+            x, y = self.world_to_screen(xy[0] + 4, xy[1] - 8)
+            size = 2 + abs(math.sin(self.time_alive * 3)) * 4
+            if not self._world_sparkle:
+                self._world_sparkle = [
+                    self.canvas.create_line(x-size, y, x+size, y, fill=C["gold"], tags="world_render"),
+                    self.canvas.create_line(x, y-size, x, y+size, fill=C["gold"], tags="world_render")]
+            else:
+                self.canvas.coords(self._world_sparkle[0], x-size, y, x+size, y)
+                self.canvas.coords(self._world_sparkle[1], x, y-size, x, y+size)
+                for item in self._world_sparkle:
+                    self.canvas.itemconfigure(item, state="normal")
+        elif self._world_sparkle:
+            for item in self._world_sparkle:
+                self.canvas.itemconfigure(item, state="hidden")
+
+    def _render_game_chrome(self):
+        ch = CHAPTERS[self.chapter]
+        self.rect(0, 0, SW, VIEW_Y - 1, C["midnight"])
+        self.rect(0, VIEW_Y, VIEW_X - 1, VIEW_Y + VIEW_H + 1, C["midnight"])
+        self.rect(VIEW_X + VIEW_W + 1, VIEW_Y, SW, VIEW_Y + VIEW_H + 1, C["midnight"])
+        self.rect(0, VIEW_Y + VIEW_H + 1, SW, SH, C["midnight"])
+        self.rect(VIEW_X, VIEW_Y, VIEW_X + VIEW_W, VIEW_Y + VIEW_H,
+                  "", C["edge"], 2)
+        self.rect(0, 0, SW, 86, C["midnight"])
+        self.line(26, 86, SW - 25, 86, fill=C["edge"])
+        self.text(34, 17, "BLACKWELL: INTO THE SHADOWS", 18, C["gold"], serif=True)
+        self.text(34, 50, f"CASE {roman(self.chapter)}   /   {ch['place'].upper()}",
+                  12, C["muted"])
+        self.button(900, 26, 112, 40, "BACK", self.go_back)
+        self.draw_game_sidebar()
+        self.draw_game_footer(self.nearest_object())
+        if self.toast_timer > 0:
+            self.draw_toast()
+
+    def draw_watchman_cone(self, watchman):
+        """Sightline guides available on V: narrow, line-of-sight clipped rays."""
+        actor = watchman.actor
+        x, y = self.world_to_screen(actor.x, actor.y)
+        base = {"right": 0, "down": math.pi / 2, "left": math.pi,
+                "up": -math.pi / 2}.get(actor.facing, 0)
+        max_range = 98 if watchman.rank == "enforcer" else 91
+        for offset in (-.56, -.28, 0, .28, .56):
+            t = base + offset
+            last = actor.feet
+            for d in range(5, max_range, 5):
+                v = (actor.x + math.cos(t) * d, actor.y + math.sin(t) * d)
+                if self.obstructed(*v, radius=1):
+                    break
+                last = v
+            tx, ty = self.world_to_screen(*last)
+            self.canvas.create_line(x, y, tx, ty, fill="#b1a27c" if abs(offset) else "#dac28e",
+                                    dash=(3, 7), tags=("world_render", "focus_fx"))
+
+    def draw_game_sidebar(self):
+        x1, x2 = 1041, 1413
+        self.frame_box(x1, 103, x2, 780, fill=C["panel"])
+        self.moth(1102, 158, scale=2)
+        self.text(1156, 138, "FIELD NOTES", 19, C["ivory"], serif=True)
+        self.line(1070, 211, 1380, 211, fill=C["thin"])
+        self.text(1071, 227, ROOM_TITLES[self.chapter][self.room_index].upper(), 11, C["cyan"])
+        status = ROOM_MOODS[self.chapter][self.room_index]
+        self.text(1071, 252, wrapped(status, 29), 11, C["ivory"], width=298)
+        self.text(1071, 318, "EVIDENCE", 11, C["gold"])
+        self.progress_marks(1074, 340, len(self.seen))
+        self.text(1194, 318, "DEDUCTION", 11, C["gold"])
+        self.progress_marks(1197, 340, len(self.solved), color=C["cyan"])
+        self.line(1070, 391, 1380, 391, fill=C["thin"])
+        self.text(1071, 412, "SECURITY AWARENESS", 11, C["muted"])
+        self.rect(1074, 443, 1360, 454, "#192c3d", C["edge"])
+        self.rect(1075, 444, 1075 + 2.84 * self.exposure, 453, C["red"])
+        if self.hidden:
+            state = "Concealed"
+            state_color = C["green"]
+        elif self.blending:
+            state = "Anonymous in the crowd"
+            state_color = C["green"]
+        elif self.crouched:
+            state = "Keeping low"
+            state_color = C["cyan"]
+        else:
+            state = "Unseen" if self.exposure < 20 else "Watched"
+            state_color = C["muted"] if self.exposure < 20 else C["red"]
+        self.text(1075, 467, state, 12, state_color)
+        identity = (COVER_IDENTITIES[self.chapter][0 if self.disguise == "staff" else 1]
+                    if self.disguise else "Your own clothes")
+        if self.cover_blown:
+            identity = "Cover compromised"
+        short_identity = identity if len(identity) <= 20 else identity[:18] + "…"
+        self.text(1075, 484, f"Cover: {short_identity}", 10,
+                  C["red"] if self.cover_blown else C["cyan"], width=219)
+        self.text(1367, 484, f"{self.coins} coins", 10, C["gold"], anchor="ne")
+        self.line(1070, 511, 1380, 511, fill=C["thin"])
+        self.text(1071, 526, "CURRENT THREAD", 11, C["gold"])
+        if self.room_index == 2:
+            objective = "Read the surviving records. The concealed route may reveal what the public archives omit."
+        elif self.room_index == 1 and len(self.solved) < 3:
+            objective = "The private wing holds guarded records. Study them carefully, then return to your deductions."
+        elif len(self.seen) < 3:
+            objective = "Explore the public room. Each object tells part of the story; the staff door leads elsewhere."
+        elif not self.witness_spoken:
+            objective = "Interview the witness. Physical clues alone cannot establish the full timeline."
+        elif len(self.solved) < 3:
+            objective = "Compare the testimony with your evidence. Test each conclusion on the board."
+        else:
+            objective = "The combined proof identifies the killer. Find a safe approach to the private rooms."
+        self.text(1073, 553, wrapped(objective, 39), 12, C["ivory"], width=290)
+        self.button(1068, 672, 137, 43, "JOURNAL", lambda: self.open_overlay("journal"))
+        self.button(1218, 672, 160, 43, "EVIDENCE", lambda: self.open_overlay("board"), primary=True)
+        self.text(1072, 733, "GOLD BADGE + NAVY CAP = SECURITY", 10, C["muted"])
+
+    def draw_game_footer(self, near):
+        portal = self.portal_nearby()
+        if portal is not None:
+            near = (portal[0], portal[1], "E  " + portal[2])
+        self.rect(26, 793, 1412, 875, C["midnight"], C["edge"])
+        self.text(45, 814, "WASD Move    CTRL Quiet walk    E Interact    Q Coin    V Sightlines", 12, C["muted"])
+        if near:
+            key, pos, display = near
+            self.text(46, 844, f"{display}   •   E", 13, C["gold"])
+        elif self.alert_caption_timer > 0:
+            self.text(46, 842, wrapped(self.alert_caption, 88), 12, C["cyan"], width=830)
+        else:
+            self.text(46, 842, "Nothing here is as ordinary as it looks.", 12, C["cyan"])
+        self.text(1369, 820, f"{self.avatar['name']}", 11, C["gold"], anchor="ne")
+
+    def draw_toast(self):
+        self.rect(142, 695, 871, 769, C["panel_high"], C["gold"])
+        self.text(160, 710, "FIELD OBSERVATION", 11, C["gold"])
+        self.text(160, 735, self.toast_text, 12, C["ivory"], width=680)
+
+    def ui_modal(self, x1=112, y1=94, x2=1328, y2=782, title=""):
+        self.rect(x1, y1, x2, y2, C["midnight"], C["gold"], 2)
+        self.rect(x1 + 6, y1 + 6, x2 - 6, y2 - 6, C["midnight"], C["thin"])
+        self.line(x1 + 26, y1 + 72, x2 - 26, y1 + 72, fill=C["edge"])
+        if title:
+            self.text(x1 + 35, y1 + 26, title, 22, C["gold"], serif=True)
+        self.button(x2 - 138, y1 + 21, 96, 37, "BACK", self.go_back)
+
+    def draw_overlay(self):
+        if self.overlay == "room_transition":
+            self.draw_room_transition()
+            return
+        if self.overlay == "wardrobe":
+            self.draw_wardrobe()
+        elif self.overlay == "cinematic":
+            self.draw_cinematic()
+        elif self.overlay == "journal":
+            self.draw_journal()
+        elif self.overlay == "board":
+            self.draw_board()
+        elif self.overlay == "deduce":
+            self.draw_deduction_choice()
+        elif self.overlay == "deduce_result":
+            self.draw_deduction_result()
+        elif self.overlay == "dialogue":
+            self.draw_dialogue()
+        elif self.overlay == "evidence":
+            self.draw_evidence_discovery()
+        elif self.overlay == "confront":
+            self.draw_confrontation()
+        elif self.overlay == "chapter_end":
+            self.draw_chapter_end()
+        elif self.overlay == "caught":
+            self.draw_caught()
+        elif self.overlay == "pause":
+            self.draw_pause()
+
+    def draw_cinematic(self):
+        ch = CHAPTERS[self.chapter]
+        self.ui_modal(title=f"CASE {roman(self.chapter)}  —  {ch['title']}")
+        self.frame_box(143, 182, 1294, 564, fill="#0f2336")
+        # World/location still image serves as a cutscene establishing shot.
+        crop = self.world_pil.crop((50, 36, 493, 275))
+        if getattr(self, "cutscene_img_step", None) != self.chapter:
+            self.cutscene_photo = ImageTk.PhotoImage(crop.resize((504, 272), Image.Resampling.NEAREST))
+            self.cutscene_img_step = self.chapter
+        self.canvas.create_image(164, 234, image=self.cutscene_photo, anchor="nw")
+        self.rect(163, 233, 669, 508, "", C["edge"])
+        beats = [
+            ch["cinematic"][0],
+            ch["intro"][0],
+            ch["cinematic"][1],
+            ch["intro"][1],
+            ch["intro"][2],
+        ]
+        total = len(beats)
+        step = min(self.cutscene_step, total - 1)
+        self.text(709, 223, "THE NIGHT UNFOLDS", 12, C["cyan"])
+        self.text(709, 274, wrapped(beats[step], 37), 18, C["ivory"], width=516)
+        self.text(710, 480, f"SCENE  {step + 1} / {total}", 11, C["muted"])
+        self.text(164, 599, "Every shadow is a possible witness.", 15, C["muted"], serif=True)
+        self.button(1043, 691, 198, 45, "CONTINUE", self.advance_cinematic, primary=True)
+        self.text(163, 702, "SPACE  to continue", 12, C["cyan"])
+
+    def advance_cinematic(self):
+        self.cutscene_step += 1
+        if self.cutscene_step >= 5:
+            self.overlay = None
+            self.show_caption(CHAPTERS[self.chapter]["cinematic"][3])
+        self.redraw()
+
+    def draw_journal(self):
+        ch = CHAPTERS[self.chapter]
+        self.ui_modal(title="FIELD JOURNAL")
+        # Warm parchment book held against the midnight game UI.
+        self.rect(144, 183, 702, 740, C["paper"], "#826b51", 2)
+        self.rect(706, 183, 1291, 740, "#e6d4ae", "#826b51", 2)
+        self.line(703, 187, 703, 736, fill="#947453", width=4)
+        self.text(164, 207, f"Case {roman(self.chapter)}", 21, C["ink"], serif=True)
+        self.text(164, 248, ch["title"], 18, C["ink"], serif=True)
+        self.line(165, 283, 678, 283, fill="#a48d69")
+        self.text(165, 303, f"Victim: {ch['victim']}", 12, C["ink"])
+        self.text(165, 335, wrapped(ch["threat"], 50), 13, C["ink"], width=480)
+        self.text(165, 443, "A PRIVATE OBSERVATION", 12, "#825e40", bold=True)
+        note = ch["journal_lore"][4 + min(5, self.ui_scroll % 6)]
+        self.text(165, 474, wrapped(note, 50), 13, C["ink"], width=478)
+        if self.witness_spoken:
+            self.text(165, 568, "WITNESS STATEMENT", 12, "#825e40", bold=True)
+            self.text(165, 603, wrapped(ch["witness"], 49), 12, C["ink"], width=478)
+        else:
+            self.text(165, 568, "Witness interview not yet recorded.", 12, "#8b7656")
+        self.text(729, 204, "EVIDENCE RECORD", 20, C["ink"], serif=True)
+        for idx, (name, detail) in enumerate(ch["clues"]):
+            y = 252 + idx * 132
+            found = idx in self.seen
+            kind = EVIDENCE_SHAPES[self.chapter][idx]
+            self.icon_draw(734, y - 3, kind, zoom=2, dim=not found)
+            self.text(798, y, name if found else "[Unexamined evidence]", 15, C["ink"] if found else "#887959", bold=found)
+            self.text(798, y + 32, wrapped(detail if found else "There is something here you have not yet studied closely enough to remember.", 50), 12, C["ink"] if found else "#8b795f", width=461)
+            self.line(732, y + 102, 1271, y + 102, fill="#b7a17e")
+        field_note = ("PRIVATE FILE: " + SECRET_REVEALS[self.chapter]) if self.infiltration_uncovered else             "A private office may contain evidence the others do not want remembered."
+        self.text(738, 656, wrapped(field_note, 73), 11, "#775940", width=515)
+
+    def draw_board(self):
+        ch = CHAPTERS[self.chapter]
+        self.ui_modal(title="EVIDENCE BOARD")
+        self.rect(146, 185, 1290, 735, "#79503a", "#b17d52", 3)
+        for yy in range(193, 730, 15):
+            for xx in range(151 + ((yy // 15) % 2) * 6, 1285, 13):
+                self.rect(xx, yy, xx + 2, yy + 1, "#8f6142")
+        self.text(177, 206, "Connect what you found. Test the hypothesis. Defend your conclusion.", 12, "#f0dbc2")
+        # A muted procedural red-thread network replaces generic number badges.
+        nodes = [(340, 347), (696, 353), (1051, 355)]
+        self.line(340, 348, 693, 352, 1050, 352, fill="#a64f4f", width=3)
+        self.line(347, 390, 520, 625, 684, 395, fill="#883944", width=2)
+        for j, (question, clue, answer) in enumerate(ch["questions"]):
+            x = 167 + j * 373
+            idx = j
+            found = idx in self.seen
+            solved = idx in self.solved
+            method = METHODS[self.chapter * 3 + idx][0]
+            paper = "#dfc69d" if found else "#bfae91"
+            self.rect(x, 272, x + 344, 556, paper, "#947352", 2)
+            self.ellipse_pin(x + 170, 272, solved)
+            self.icon_draw(x + 285, 287, EVIDENCE_SHAPES[self.chapter][j], zoom=2, dim=not found)
+            self.text(x + 22, 294, method.upper(), 13, "#54382c", bold=True, width=268)
+            self.text(x + 22, 333, wrapped(question, 38), 14, "#30221d", width=299)
+            self.line(x + 20, 423, x + 320, 423, fill="#b39b78")
+            self.text(x + 22, 437, f"Supporting: {clue}", 12, "#7d5d43", width=300)
+            self.text(x + 22, 478, "SUPPORTED" if solved else ("READY TO TEST" if found else "UNSUPPORTED"), 11,
+                      "#35744c" if solved else "#7d5d43", bold=True)
+            self.button(x + 22, 510, 300, 32, "REVIEW" if solved else "FORM A DEDUCTION", lambda n=j: self.start_deduction(n), enabled=found, size=11)
+        self.text(179, 615, "Every answer leaves a shadow. Follow the one the witnesses avoid.", 13, "#f0dbc2")
+        self.text(179, 652, f"CONCLUSIONS: {len(self.solved)}/3    WITNESS: {'RECORDED' if self.witness_spoken else 'NOT YET INTERVIEWED'}", 13, "#f0dbc2")
+
+    def ellipse_pin(self, x, y, solved):
+        self.canvas.create_oval(x - 9, y - 10, x + 9, y + 9, fill="#5d2a34" if not solved else "#4f6948", outline="#e1a67e")
+        self.canvas.create_oval(x - 3, y - 4, x + 3, y + 2, fill="#bb7a6b" if not solved else "#bad09f", outline="")
+
+    def start_deduction(self, idx):
+        if idx not in self.seen:
+            self.toast("A conclusion needs something real beneath it.")
+            return
+        self.deduction_chosen = idx
+        self.overlay = "deduce"
+        self.redraw()
+
+    def draw_deduction_choice(self):
+        ch = CHAPTERS[self.chapter]
+        idx = self.deduction_chosen
+        method = METHODS[self.chapter * 3 + idx]
+        question, clue, truth = ch["questions"][idx]
+        self.ui_modal(title=f"REASONING  /  {method[0].upper()}")
+        self.text(166, 202, "EVIDENCE IN HAND", 11, C["cyan"])
+        self.text(166, 238, clue, 19, C["gold"], serif=True)
+        self.text(166, 288, wrapped(ch["clues"][idx][1], 79), 14, C["ivory"], width=1050)
+        self.line(165, 371, 1261, 371, fill=C["edge"])
+        self.text(166, 398, question, 17, C["ivory"], bold=True)
+        choices = self.deduction_options(idx)
+        for j, option in enumerate(choices):
+            yy = 449 + j * 88
+            self.button(166, yy, 1075, 72, wrapped(option, 100), lambda k=j: self.answer_deduction(k), size=12)
+        self.text(166, 728, "Only a conclusion consistent with the physical evidence belongs in the case file.", 11, C["muted"])
+
+    def deduction_options(self, idx):
+        ch = CHAPTERS[self.chapter]
+        correct = ch["questions"][idx][2]
+        a, b = ch["deduction_decoys"][idx]
+        options = [a, b, correct]
+        order = (self.chapter * 5 + idx * 7 + 1) % 3
+        return options[order:] + options[:order]
+
+    def answer_deduction(self, selection):
+        idx = self.deduction_chosen
+        options = self.deduction_options(idx)
+        correct = CHAPTERS[self.chapter]["questions"][idx][2]
+        self.answer_correct = options[selection] == correct
+        if self.answer_correct:
+            self.solved.add(idx)
+            self.toast("The pieces fit. Another false story falls away.")
+        else:
+            self.wrong_attempts += 1
+            # A mistaken theory is a reasoning error, not a noise event.
+            self.toast("The evidence resists that explanation. Reconsider the details.")
+        self.overlay = "deduce_result"
+        self.save()
+        self.redraw()
+
+    def draw_deduction_result(self):
+        idx = self.deduction_chosen
+        ch = CHAPTERS[self.chapter]
+        method = METHODS[self.chapter * 3 + idx][0]
+        self.ui_modal(title="CONCLUSION  /  " + method.upper())
+        self.moth(1159, 259, 3, C["gold"] if self.answer_correct else C["red"])
+        self.text(169, 239, "THEORY ACCEPTED" if self.answer_correct else "THEORY REJECTED", 26,
+                  C["green"] if self.answer_correct else C["red"], serif=True)
+        if self.answer_correct:
+            body = ch["questions"][idx][2]
+        else:
+            body = "A detail in your evidence contradicts that interpretation. No progress has been recorded."
+        self.text(167, 328, wrapped(body, 70), 19, C["ivory"], width=960)
+        self.line(166, 501, 1249, 501, fill=C["edge"])
+        self.text(166, 532, "A theory can survive scrutiny, or collapse beneath a single detail.", 13, C["muted"], width=1000)
+        self.button(995, 688, 215, 44, "RETURN TO BOARD", lambda: self.open_overlay("board"), primary=True)
+
+    def draw_dialogue(self):
+        ch = CHAPTERS[self.chapter]
+        self.ui_modal(title="AN INTERVIEW IN THE DARK")
+        d = ch["dialogue"][min(self.dialogue_step, len(ch["dialogue"]) - 1)]
+        self.frame_box(168, 207, 443, 575, fill="#172a40")
+        speaker = d["speaker"]
+        portrait = self.sprite_factory.photo(self.world.witness.coat,
+                                           self.world.witness.hair,
+                                           self.world.witness.skin,
+                                           "down", (self.tick_count // 5) % 6,
+                                           self.world.witness.hat, zoom=8)
+        self.canvas.create_image(308, 266, image=portrait, anchor="n")
+        self.frame_box(464, 207, 1223, 575, fill="#0c2036")
+        self.text(493, 236, speaker, 21, C["gold"], serif=True)
+        self.text(493, 311, wrapped(d["text"], 53), 18, C["ivory"], width=687)
+        self.text(492, 520, "Not every answer is reliable. The journal records what is said, not what is proved.", 11, C["cyan"], width=665)
+        self.text(169, 680, "SPACE / ENTER  to continue", 12, C["cyan"])
+        self.button(989, 674, 191, 44, "CONTINUE", self.advance_dialogue, primary=True)
+
+    def advance_dialogue(self):
+        self.dialogue_step += 1
+        if self.dialogue_step >= len(CHAPTERS[self.chapter]["dialogue"]):
+            self.overlay = None
+            self.witness_spoken = True
+            self.show_caption(CHAPTERS[self.chapter]["cinematic"][7])
+            self.save()
+        self.redraw()
+
+    def draw_evidence_discovery(self):
+        ch = CHAPTERS[self.chapter]
+        idx = self.discovery_index
+        obj = next((item for item in self.world.objects if item.id == f"clue_{idx}"), None)
+        if obj is None:
+            obj = next((item for item in make_level(self.chapter).objects if item.id == f"clue_{idx}"), None)
+        if obj is None:
+            self.overlay = None
+            return
+        self.ui_modal(title="AN OBJECT THAT DOES NOT BELONG")
+        self.frame_box(153, 183, 458, 646, fill="#173048")
+        scene_crop = self.world_pil.crop((max(0, int(obj.x) - 30), max(0, int(obj.y) - 30),
+                                        min(WORLD_W, int(obj.x) + 30), min(WORLD_H, int(obj.y) + 30)))
+        scaled = scene_crop.resize((250, 250), Image.Resampling.NEAREST)
+        self.discovery_photo = ImageTk.PhotoImage(scaled)
+        self.canvas.create_image(183, 230, image=self.discovery_photo, anchor="nw")
+        self.icon_draw(264, 518, obj.kind, zoom=4)
+        self.text(488, 227, obj.name, 24, C["gold"], serif=True)
+        self.text(489, 307, wrapped(obj.details, 63), 17, C["ivory"], width=730)
+        self.line(489, 461, 1218, 461, fill=C["edge"])
+        self.text(489, 493, wrapped(ch["discovery_moments"][idx], 76), 14, C["cyan"], width=720)
+        self.text(489, 600, "The detail stays with you. It will matter when the stories stop agreeing.", 12, C["muted"])
+        self.button(978, 680, 210, 44, "RETURN TO SCENE", self.close_overlay, primary=True)
+
+    def draw_confrontation(self):
+        ch = CHAPTERS[self.chapter]
+        self.ui_modal(title="THE PERSON IN THE SHADOW")
+        self.frame_box(154, 199, 788, 624, fill="#111f34")
+        self.frame_box(813, 199, 1286, 624, fill="#271a27")
+        protagonist = self.sprite_factory.photo(self.player.coat, self.player.hair, self.player.skin,
+                                                "right", (self.tick_count // 7) % 6, self.player.hat,
+                                                self.player.accessory, zoom=7)
+        antagonist = self.sprite_factory.photo(self.world.killer.coat, self.world.killer.hair,
+                                               self.world.killer.skin, "left", 0, self.world.killer.hat,
+                                               zoom=7)
+        self.canvas.create_image(315, 311, image=protagonist, anchor="n")
+        self.canvas.create_image(622, 307, image=antagonist, anchor="n")
+        self.text(857, 231, ch["culprit"], 24, C["gold"], serif=True)
+        self.text(857, 281, ch["role"], 12, C["muted"])
+        premise, peril, proof = INVESTIGATION_STAKES[self.chapter]
+        lines = [
+            f"You name {ch['culprit']} and reconstruct the crime. {premise}",
+            f"THE PROOF: {proof}",
+            ch["reveal"],
+            f"THE DANGER: {peril}",
+            "The constables cannot be trusted with the only surviving testimony. Evelyn insists the killer must die tonight. "
+            "You feel the weight of her demand—and begin to wonder why she keeps choosing you.",
+        ]
+        n = min(self.confront_step, len(lines) - 1)
+        self.text(855, 339, wrapped(lines[n], 39), 15, C["ivory"], width=372)
+        self.text(190, 576, "A sharp decision in a room too quiet for forgiveness.", 13, C["cyan"])
+        if self.confront_step < len(lines) - 1:
+            self.button(984, 679, 205, 45, "CONTINUE", self.advance_confrontation, primary=True)
+        else:
+            self.button(190, 671, 350, 49, "END THE MURDERER", self.execute_finale, primary=True)
+            self.button(570, 671, 255, 49, "WITHDRAW", self.close_overlay)
+        self.text(857, 575, "A complete case proves guilt. Evelyn's order to kill is a separate moral burden.", 11, C["muted"], width=340)
+
+    def advance_confrontation(self):
+        self.confront_step += 1
+        self.redraw()
+
+    def execute_finale(self):
+        # Stylized, non-graphic conclusion; no violent gameplay instructions.
+        self.unlocked = max(self.unlocked, min(9, self.chapter + 1))
+        self.thumbnails.clear()
+        self.finished = self.chapter == 9
+        self.end_grade = "GHOST" if self.exposure < 15 else "SLEUTH" if self.exposure < 50 else "SURVIVOR"
+        self.overlay = "chapter_end"
+        self.save()
+        self.redraw()
+
+    def draw_chapter_end(self):
+        ch = CHAPTERS[self.chapter]
+        self.ui_modal(title=f"THE END OF CASE {roman(self.chapter)}")
+        self.moth(1074, 252, scale=4, color=C["gold"])
+        self.text(169, 226, "The lamp goes out.", 30, C["ivory"], serif=True)
+        self.text(169, 302, wrapped(ch["aftermath"], 77), 18, C["ivory"], width=852)
+        self.line(170, 488, 1247, 488, fill=C["edge"])
+        self.text(169, 515, "CASE ASSESSMENT", 13, C["gold"])
+        self.text(169, 550, f"{self.end_grade}  •  {len(self.seen)} pieces of evidence  •  {len(self.solved)} supported deductions", 15, C["cyan"])
+        after = SECRET_REVEALS[self.chapter] if self.infiltration_uncovered else "One of the room's private secrets remains buried behind the staff door."
+        self.text(169, 590, wrapped(after, 101), 12, C["muted"], width=1030)
+        label = "RETURN TO TITLE" if self.chapter == 9 else "NEXT CHAPTER"
+        self.button(168, 681, 295, 45, label, self.next_chapter, primary=True)
+        self.button(497, 681, 258, 45, "CHAPTER SELECT", self.chapter_select)
+
+    def draw_caught(self):
+        self.ui_modal(title="A LAMP TURNS TOWARD YOU")
+        self.text(165, 241, "They have seen you.", 29, C["red"], serif=True)
+        self.text(165, 320, "The watchman has a long memory and a shorter temper. He forces you back toward the entrance.", 17, C["ivory"], width=850)
+        self.text(165, 421, "Your notes, clues and deductions remain intact. Your position—and your cover—do not.", 14, C["cyan"], width=880)
+        self.button(925, 686, 270, 44, "RE-ENTER THE ROOM", self.reset_after_capture, primary=True)
+
+    def draw_pause(self):
+        self.ui_modal(title="THE INVESTIGATION PAUSES")
+        self.text(181, 235, "The night is not going anywhere.", 23, C["ivory"], serif=True)
+        self.button(188, 350, 333, 53, "RESUME INVESTIGATION", self.close_overlay, primary=True)
+        self.button(188, 422, 333, 53, "RETURN TO TITLE", self.return_menu)
+        self.button(188, 495, 333, 53, "CONTROLS", lambda: self.open_screen("help"))
+
+    def chapter_select(self):
+        self.overlay = None
+        self.save()
+        self.open_screen("select")
+
+    def next_chapter(self):
+        self.overlay = None
+        self.save()
+        if self.chapter >= 9:
+            self.return_menu()
+        else:
+            self.start_game(self.chapter + 1)
+
+    def go_back(self):
+        """One obvious, consistent route to the previous context."""
+        if self.overlay == "room_transition":
+            return
+        if self.screen == "game":
+            if self.overlay is None:
+                self.overlay = "pause"
+            elif self.overlay == "deduce" or self.overlay == "deduce_result":
+                self.overlay = "board"
+                self.deduction_chosen = None
+            elif self.overlay == "cinematic":
+                if self.cutscene_step > 0:
+                    self.cutscene_step -= 1
+                else:
+                    self.return_menu()
+                    return
+            elif self.overlay == "dialogue":
+                if self.dialogue_step > 0:
+                    self.dialogue_step -= 1
+                else:
+                    self.overlay = None
+            elif self.overlay == "confront":
+                if self.confront_step > 0:
+                    self.confront_step -= 1
+                else:
+                    self.overlay = None
+            elif self.overlay == "chapter_end":
+                self.chapter_select()
+                return
+            elif self.overlay == "caught":
+                self.reset_after_capture()
+                return
+            elif self.overlay == "pause":
+                self.overlay = None
+            else:
+                self.overlay = None
+        elif self.screen == "profile":
+            self.profile_return()
+            return
+        elif self.screen in {"help", "select"}:
+            previous = self.screen_return
+            if previous and previous[0] == "game":
+                self.screen, self.overlay = previous
+                self.screen_return = None
+            else:
+                self.return_menu()
+                return
+        self.redraw()
+
+    def open_overlay(self, name):
+        self.overlay = name
+        self.redraw()
+
+    def close_overlay(self):
+        self.overlay = None
+        self.deduction_chosen = None
+        self.redraw()
+
+    # -------- interaction / movement / stealth --------
+    def nearest_object(self):
+        if self.screen != "game" or self.overlay:
+            return None
+        here = (self.player.x, self.player.y)
+        possibilities = []
+        for item in self.world.objects:
+            if item.secret and int(item.id.split("_")[-1]) in self.notes:
+                continue
+            dd = distance(here, (item.x, item.y))
+            if dd <= 42:
+                if item.id == "uniform":
+                    display = "Browse the clothes on the coatstand"
+                elif item.id.startswith("clue") and int(item.id[-1]) in self.seen:
+                    display = "Study " + item.name.lower() + " again"
+                else:
+                    display = "Examine " + item.name.lower()
+                possibilities.append((dd, item.id, (item.x, item.y), display))
+        dd = distance(here, self.world.witness.feet)
+        if self.room_index == 0 and dd <= 33:
+            possibilities.append((dd, "witness", self.world.witness.feet, "Speak quietly with the witness"))
+        dd = distance(here, self.world.killer.feet)
+        if self.room_index == 1 and dd <= 37:
+            if len(self.solved) == 3 and len(self.seen) == 3:
+                display = "Confront the person by the wall"
+            else:
+                display = "A familiar face. Something about the story still feels wrong"
+            possibilities.append((dd, "killer", self.world.killer.feet, display))
+        for j, spot in enumerate(self.world.hide_positions):
+            dd = distance(here, spot)
+            if dd <= 23:
+                possibilities.append((dd, f"hide_{j}", spot, "Leave cover" if self.hidden else "Slip into cover"))
+        for j, (x, y, radius) in enumerate(self.world.blend_zones):
+            dd = distance(here, (x, y))
+            if dd <= radius:
+                possibilities.append((dd + 13, f"blend_{j}", (x, y), "Leave the conversation" if self.blending else "Blend into the conversation"))
+        if not possibilities:
+            return None
+        possibilities.sort(key=lambda item: item[0])
+        _, key, xy, display = possibilities[0]
+        return key, xy, display
 
     def interact(self):
-        context = self.world.local_context()
-        if not context:
-            self.world.say('Walk beside a deposit, construction site, robot or the core.')
+        portal = self.portal_nearby()
+        near = self.nearest_object()
+        # A nearby exit must not steal the E key from a clue or witness that
+        # the player is standing directly beside. Prefer the closest actual
+        # object, with a small bias toward physical evidence.
+        if portal is not None and near is not None:
+            item_distance = distance(self.player.feet, near[1])
+            door_distance = distance(self.player.feet, portal[1])
+            if item_distance + 8 < door_distance:
+                portal = None
+        if portal is not None:
+            self.use_portal(portal[0])
             return
-        kind,key = context
-        if kind=='robot':
-            self.panel = ('robot',key)
-            self.world.opened_robot = True
-            self.keys.clear()
-        elif kind=='core':
-            self.panel = ('core',key)
-            self.keys.clear()
-        # Deposits and work orders are handled continuously while E is held.
-
-    def choose_blueprint(self,index):
-        self.blueprint = index
-        self.world.selected_once = self.world.selected_once or index==0
-        self.category = 'robots' if index<12 else 'structures'
-        if index<12:self.blueprint_page=index//4
-
-    def click(self,event):
-        self.hover = self.logical(event)
-        if self.transition:
+        if near is None:
+            self.toast("Nothing catches your eye from here. A closer look might reveal more.")
             return
-        x,y = self.hover
-        for rect,action,enabled in reversed(self.buttons):
-            if rect[0]<=x<=rect[0]+rect[2] and rect[1]<=y<=rect[1]+rect[3]:
-                if enabled:
-                    self.action(action)
+        key, xy, display = near
+        if key in {"archive_secret", "private_file"}:
+            note_id = 2 if key == "archive_secret" else 1
+            self.notes.add(note_id)
+            self.infiltration_uncovered = self.infiltration_uncovered or key == "private_file"
+            self.show_caption(SECRET_REVEALS[self.chapter] if key == "private_file" else
+                              "Beneath the bricks, a record survives that the Lantern meant to erase.")
+            self.save()
+            self.redraw()
+            return
+        if key == "uniform":
+            self.overlay = "wardrobe"
+            self.redraw()
+            return
+        if key.startswith("clue_"):
+            idx = int(key[-1])
+            was_new = idx not in self.seen
+            self.seen.add(idx)
+            if was_new:
+                self.discovery_index = idx
+                self.overlay = "evidence"
+                self.show_caption(CHAPTERS[self.chapter]["cinematic"][5 + idx])
+            else:
+                self.toast("You already studied this object. Your field journal has the details.")
+            self.save()
+        elif key.startswith("optional_"):
+            idx = int(key[-1])
+            self.notes.add(idx)
+            self.show_caption(CHAPTERS[self.chapter]["cinematic"][idx + 8])
+            self.toast("A small detail slips into the margins of your case notes.")
+            self.save()
+        elif key == "witness":
+            self.dialogue_step = 0
+            self.overlay = "dialogue"
+        elif key == "killer":
+            if len(self.solved) < 3 or len(self.seen) < 3 or not self.witness_spoken:
+                self.toast("The accusation needs the three proofs and a recorded witness statement.")
+            elif self.exposure > 38 or any(g.mode == "pursue" for g in self.watchmen):
+                self.toast("You are being watched. Lose the watchman before you approach.")
+            else:
+                self.confront_step = 0
+                self.overlay = "confront"
+        elif key.startswith("hide_"):
+            self.toggle_hide()
+        elif key.startswith("blend_"):
+            self.toggle_blend()
+        self.redraw()
+
+    def draw_wardrobe(self):
+        self.ui_modal(title="A SECOND IDENTITY")
+        self.frame_box(159, 188, 484, 642, fill="#172c40")
+        self.text(187, 213, "AN UNATTENDED COATSTAND", 16, C["gold"], serif=True)
+        self.text(188, 266, wrapped(COVER_LINES[self.chapter], 31), 14, C["ivory"], width=278)
+        self.text(188, 441, "A good disguise opens doors. A bad performance draws attention.", 12, C["cyan"], width=269)
+        self.frame_box(518, 190, 1248, 642, fill="#0b2034")
+        staff, guest = COVER_IDENTITIES[self.chapter]
+        self.text(552, 220, "CHOOSE A COVER", 22, C["ivory"], serif=True)
+        self.text(552, 278, staff, 17, C["gold"], serif=True)
+        self.text(552, 310, "Allows entry to staff rooms, but senior guards recognize unfamiliar faces. Avoid close inspection.", 13, C["muted"], width=616)
+        self.button(555, 368, 275, 42, "WEAR STAFF UNIFORM", lambda: self.equip_disguise("staff"), primary=True)
+        self.text(552, 451, guest, 17, C["gold"], serif=True)
+        self.text(552, 485, "Believable among guests and witnesses. It does not grant staff access.", 13, C["muted"], width=616)
+        self.button(555, 544, 275, 42, "CHANGE INTO GUEST", lambda: self.equip_disguise("guest"))
+        self.button(856, 544, 264, 42, "RETURN TO YOUR CLOTHES", lambda: self.equip_disguise(None))
+        self.text(166, 679, "The uniform helps only while your cover remains believable.", 12, C["cyan"])
+        self.button(1040, 688, 167, 42, "LEAVE", self.close_overlay)
+
+    def equip_disguise(self, kind):
+        self.disguise = kind
+        self.scrutiny = 0.0
+        self.cover_blown = False
+        self.hidden = False
+        self.blending = False
+        self.overlay = None
+        if kind is None:
+            self.show_caption("You fold the borrowed clothing away. The room feels less forgiving.")
+        else:
+            name = COVER_IDENTITIES[self.chapter][0 if kind == "staff" else 1]
+            self.show_caption(f"You become the {name.lower()}. Keep a steady pace: a uniform is not a personality.")
+        self.save()
+        self.redraw()
+
+    def restricted(self, x, y):
+        # Security is confined to the private wing, not a hidden invisible
+        # rectangle arbitrarily painted over the public investigation.
+        return self.room_index == 1 and x > 120
+
+    def authorized_in_office(self):
+        return self.disguise == "staff" and not self.cover_blown
+
+    def try_drop_coin(self):
+        if self.coins <= 0:
+            self.toast("Your pockets are empty. Distraction is no longer an option.")
+            return
+        direction = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}[self.player.facing]
+        target = (clamp(self.player.x + direction[0] * 56, 28, WORLD_W - 28),
+                  clamp(self.player.y + direction[1] * 56, 43, WORLD_H - 25))
+        self.coins -= 1
+        self.decoy = target
+        self.decoy_expire = self.time_alive + 1.35
+        for g in self.watchmen:
+            if distance(g.actor.feet, target) < 130:
+                g.last_known = target
+                g.mode = "investigate"
+                g.linger = 4.0
+                g.notice = min(100, g.notice + 8)
+        self.show_caption(DECOY_LINES[self.chapter])
+        self.save()
+        self.redraw()
+
+    def update_cover(self, dt):
+        if self.disguise is None or self.cover_blown:
+            self.scrutiny = max(0, self.scrutiny - dt * 20)
+            return
+        enforcers = [g for g in self.watchmen if g.rank == "enforcer" and
+                     self.security_zone(self.player.feet) and
+                     distance(g.actor.feet, self.player.feet) < 35 and
+                     self.guard_can_see(g)]
+        self.scrutiny = min(100, self.scrutiny + dt * 35) if enforcers else max(0, self.scrutiny - dt * 17)
+        if self.scrutiny >= 100:
+            self.cover_blown = True
+            for g in enforcers:
+                g.notice = max(g.notice, 65)
+                g.mode = "investigate"
+                g.last_known = self.player.feet
+                g.linger = 4
+            self.show_caption("A senior watchman has recognized that the uniform belongs to someone else.")
+            self.toast("COVER COMPROMISED")
+            self.save()
+
+    def toggle_hide(self):
+        near = min((distance(self.player.feet, pos) for pos in self.world.hide_positions), default=999)
+        if self.hidden:
+            self.hidden = False
+            self.toast("You leave cover. The room feels far less forgiving.")
+        elif near <= 26:
+            self.hidden = True
+            self.blending = False
+            self.click_destination = None
+            self.player.vx = self.player.vy = 0
+            self.toast("You disappear into the dark edge of the room.")
+        else:
+            self.toast("Find deep shadow, a cabinet, or the shelter of furniture first.")
+
+    def toggle_blend(self):
+        in_crowd = any(distance(self.player.feet, (x, y)) < radius for x, y, radius in self.world.blend_zones)
+        if self.blending:
+            self.blending = False
+            self.toast("You drift away from the conversation.")
+        elif in_crowd:
+            self.blending = True
+            self.hidden = False
+            self.running = False
+            self.toast("You lower your head and become another indistinct guest.")
+        else:
+            self.toast("You need people nearby to blend in. Find a small group.")
+
+    def obstructed(self, x, y, radius=4):
+        for x1, y1, x2, y2 in self.world.collisions:
+            if x + radius > x1 and x - radius < x2 and y + radius > y1 and y - radius < y2:
+                return True
+        return False
+
+    def move_agent(self, agent, vx, vy, dt):
+        # Swept substeps prevent sprinting through narrow objects during a
+        # temporary frame drop. X/Y resolution gives smooth wall sliding.
+        pieces = max(1, math.ceil(max(abs(vx * dt), abs(vy * dt)) / 3.0))
+        for _ in range(pieces):
+            nx = agent.x + vx * dt / pieces
+            if not self.obstructed(nx, agent.y):
+                agent.x = nx
+            else:
+                agent.vx = 0
+            ny = agent.y + vy * dt / pieces
+            if not self.obstructed(agent.x, ny):
+                agent.y = ny
+            else:
+                agent.vy = 0
+        agent.x = clamp(agent.x, 25, WORLD_W - 25)
+        agent.y = clamp(agent.y, 46, WORLD_H - 25)
+
+    def update_player(self, dt):
+        x = float("right" in self.held or "d" in self.held) - float("left" in self.held or "a" in self.held)
+        y = float("down" in self.held or "s" in self.held) - float("up" in self.held or "w" in self.held)
+        if abs(x) > 0 or abs(y) > 0:
+            self.click_destination = None
+            self.click_path = []
+        elif self.click_destination is not None:
+            while self.click_path and distance(self.player.feet, self.click_path[0]) < 7:
+                self.click_path.pop(0)
+            if self.click_path:
+                dx = self.click_path[0][0] - self.player.x
+                dy = self.click_path[0][1] - self.player.y
+                x, y = unit(dx, dy)
+            else:
+                self.click_destination = None
+        x, y = unit(x, y)
+        self.running = False  # No sprint: consistent walking gives guards readable patrol timing.
+        self.crouched = "control_l" in self.held or "control_r" in self.held or "control" in self.held
+        if self.blending:
+            self.running = False
+        if self.hidden and (abs(x) + abs(y)) > 0.05:
+            self.hidden = False
+        speed = 55.0
+        if self.crouched:
+            speed = 28.0
+        if self.blending:
+            speed = 30.0
+        # Frames-per-second independent acceleration / deceleration.
+        old_vx = self.player.vx
+        old_vy = self.player.vy
+        response = 1 - math.exp(-14.0 * dt) if (x or y) else 1 - math.exp(-19.5 * dt)
+        self.player.vx = lerp(self.player.vx, x * speed, response)
+        self.player.vy = lerp(self.player.vy, y * speed, response)
+        if abs(self.player.vx) < .25:
+            self.player.vx = 0
+        if abs(self.player.vy) < .25:
+            self.player.vy = 0
+        if self.hidden:
+            self.player.vx = self.player.vy = 0
+        prev_x, prev_y = self.player.x, self.player.y
+        self.move_agent(self.player, self.player.vx, self.player.vy, dt)
+        # Trespassing is a SECURITY RULE, not an invisible wall. Anyone can
+        # enter; only a suitable disguise makes it legitimate. Crouching still
+        # needs cover and timing. Private records are optional lore.
+        if self.restricted(self.player.x, self.player.y) and not self.authorized_in_office():
+            if self.time_alive - self.restricted_warning_at > 7.0:
+                self.restricted_warning_at = self.time_alive
+                self.show_caption("The staff office is restricted. You can enter, but security will challenge an unknown face.")
+        if self.restricted(self.player.x, self.player.y) and not self.infiltration_uncovered:
+            if (self.disguise == "staff" and not self.cover_blown) or self.hidden or self.exposure < 30:
+                self.infiltration_uncovered = True
+                self.show_caption(SECRET_REVEALS[self.chapter], duration=7.0)
+                self.save()
+        moving = math.hypot(self.player.vx, self.player.vy) > 6
+        self.player.moving = moving
+        if moving:
+            self.player.frame += dt * (6 if not self.crouched else 3.8)
+            if abs(self.player.vx) > abs(self.player.vy):
+                self.player.facing = "right" if self.player.vx > 0 else "left"
+            else:
+                self.player.facing = "down" if self.player.vy > 0 else "up"
+        else:
+            self.player.frame = 0
+        if self.blending:
+            if not any(distance(self.player.feet, (cx, cy)) < cr + 10 for cx, cy, cr in self.world.blend_zones):
+                self.blending = False
+                self.show_caption("You have wandered out of the crowd and into the open.")
+        # Camera dead zone: let the detective walk within the middle of the
+        # room before shifting the expensive full-room bitmap. This is also
+        # more readable when examining nearby furniture and evidence.
+        target_x, target_y = self.cam_x, self.cam_y
+        left, right = self.cam_x + VISIBLE_W * .37, self.cam_x + VISIBLE_W * .63
+        top, bottom = self.cam_y + VISIBLE_H * .35, self.cam_y + VISIBLE_H * .65
+        if self.player.x < left:
+            target_x = self.player.x - VISIBLE_W * .37
+        elif self.player.x > right:
+            target_x = self.player.x - VISIBLE_W * .63
+        if self.player.y < top:
+            target_y = self.player.y - VISIBLE_H * .35
+        elif self.player.y > bottom:
+            target_y = self.player.y - VISIBLE_H * .65
+        target_x = clamp(target_x, 0, WORLD_W - VISIBLE_W)
+        target_y = clamp(target_y, 0, WORLD_H - VISIBLE_H)
+        ca = 1 - math.exp(-8.4 * dt)
+        self.cam_x = lerp(self.cam_x, target_x, ca)
+        self.cam_y = lerp(self.cam_y, target_y, ca)
+
+    def sight_blocked(self, p1, p2):
+        # Samples the segment against the map's solid furniture/walls; makes
+        # cover useful rather than a cosmetic 'H' button.
+        steps = max(2, int(distance(p1, p2) / 5))
+        for i in range(1, steps):
+            alpha = i / steps
+            x = lerp(p1[0], p2[0], alpha)
+            y = lerp(p1[1], p2[1], alpha)
+            if self.obstructed(x, y, 1):
+                return True
+        return False
+
+    def security_zone(self, xy):
+        return self.room_index == 1 and xy[0] > 112
+
+    def suspicious_to(self, watchman):
+        if not self.security_zone(self.player.feet):
+            return False
+        if self.disguise == "staff" and not self.cover_blown:
+            # Only the more perceptive senior guard detects stolen uniforms.
+            return watchman.rank == "enforcer" or self.crouched
+        return True
+
+    def guard_can_see(self, watchman=None):
+        g = watchman or self.watchmen[0]
+        a = g.actor
+        dist = distance(a.feet, self.player.feet)
+        if dist > (112 if g.rank == "enforcer" else 96):
+            return False
+        # Hiding is not a universal invisibility cheat: contact still reveals.
+        if self.hidden and dist > 13:
+            return False
+        if self.blending and dist > 18 and not self.restricted(*self.player.feet):
+            return False
+        facing = {"up": (0, -1), "down": (0, 1),
+                  "left": (-1, 0), "right": (1, 0)}[a.facing]
+        look = unit(self.player.x - a.x, self.player.y - a.y)
+        threshold = .61 if g.rank == "security" else .54
+        if facing[0] * look[0] + facing[1] * look[1] < threshold and dist > 15:
+            return False
+        return not self.sight_blocked(a.feet, self.player.feet)
+
+    def guard_hears(self, watchman=None):
+        g = watchman or self.watchmen[0]
+        if self.hidden or not self.player.moving or not self.security_zone(self.player.feet):
+            return False
+        d = distance(g.actor.feet, self.player.feet)
+        # Slow steps are quieter, NOT unseen. Guards investigate footsteps,
+        # then look where they think the player went.
+        return d < (13 if self.crouched else 47)
+
+    def guard_move(self, g, goal, speed, dt):
+        g.repath -= dt
+        if (g.path_goal is None or distance(goal, g.path_goal) > 12 or
+                g.repath <= 0 or not g.path):
+            g.path = self.nav.path(g.actor.feet, goal)
+            g.path_goal = goal
+            g.repath = .55 if g.mode == "pursue" else 1.1
+        while g.path and distance(g.actor.feet, g.path[0]) < 6.5:
+            g.path.pop(0)
+        node = g.path[0] if g.path else goal
+        dx, dy = node[0] - g.actor.x, node[1] - g.actor.y
+        vx, vy = unit(dx, dy)
+        if abs(dx) > abs(dy):
+            g.actor.facing = "right" if dx > 0 else "left"
+        elif abs(dy) > 1:
+            g.actor.facing = "down" if dy > 0 else "up"
+        self.move_agent(g.actor, vx * speed, vy * speed, dt)
+        g.actor.frame += dt * 5
+
+    def update_guard(self, dt):
+        """Independent patrol / curious / investigate / search / pursuit AI.
+
+        Enforcers challenge even uniformed strangers. A guard in public space
+        is just a person: seeing a detective beside the public evidence does
+        not start a chase. Every alert needs vision or believable sound.
+        """
+        self.update_cover(dt)
+        any_alert = 0.0
+        for g in self.watchmen:
+            visual = self.guard_can_see(g)
+            illegal = self.suspicious_to(g)
+            audible = self.guard_hears(g)
+            if visual and illegal:
+                # Crouching is more suspicious if visible, never protective.
+                rate = (64 if self.crouched else 44) * (1.25 if g.rank == "enforcer" else 1)
+                g.notice = min(100, g.notice + dt * rate)
+                g.last_known = self.player.feet
+                g.linger = 4.8
+                if g.notice > 67:
+                    g.mode = "pursue"
+                elif g.notice > 17:
+                    g.mode = "curious"
+            else:
+                g.notice = max(0, g.notice - dt * (13 if g.mode == "search" else 22))
+                if audible and g.mode not in {"pursue", "investigate"}:
+                    g.last_known = self.player.feet
+                    g.mode = "investigate"
+                    g.linger = 3.7
+            # Players can read the state in animation: patrols move steadily,
+            # guards pause to inspect, search turns are slower, pursuit fast.
+            if g.mode == "pursue":
+                if visual and illegal:
+                    g.last_known = self.player.feet
+                    g.linger = 4.0
+                g.linger -= dt
+                if g.last_known:
+                    self.guard_move(g, g.last_known, 69, dt)
+                if g.linger <= 0:
+                    g.mode, g.linger = "search", 4.0
+            elif g.mode in {"curious", "investigate", "search"}:
+                g.linger -= dt
+                if g.last_known and distance(g.actor.feet, g.last_known) > 9:
+                    self.guard_move(g, g.last_known, 31, dt)
+                else:
+                    g.scan_clock += dt
+                    if g.scan_clock > .65:
+                        g.scan_clock = 0
+                        faces = ["right", "down", "left", "up"]
+                        g.search_turns += 1
+                        g.actor.facing = faces[(g.search_turns + g.waypoint) % 4]
+                if g.linger <= 0 and g.notice < 10:
+                    g.mode, g.last_known = "patrol", None
+            else:
+                if not g.route:
+                    continue
+                goal = g.route[g.waypoint]
+                if distance(g.actor.feet, goal) < 7:
+                    # A short observable pause at each waypoint gives timing.
+                    g.linger += dt
+                    if g.linger >= .65:
+                        g.waypoint = (g.waypoint + 1) % len(g.route)
+                        g.linger = 0
+                    else:
+                        g.actor.facing = ("right", "down", "left", "up")[g.waypoint % 4]
+                else:
+                    self.guard_move(g, goal, 22 if g.rank == "enforcer" else 25, dt)
+            any_alert = max(any_alert, g.notice)
+            if g.mode == "pursue" and distance(g.actor.feet, self.player.feet) < 12:
+                self.exposure = 100
+        self.guard_mode = "chase" if any(g.mode == "pursue" for g in self.watchmen) else "patrol"
+        self.exposure = max(0.0, min(100.0, max(any_alert, self.exposure - dt * 28)))
+        if self.exposure >= 100:
+            self.overlay = "caught"
+            self.click_destination = None
+            self.clear_held()
+
+    def reset_after_capture(self):
+        self.player.x, self.player.y = find_nearest_open(self.world, self.world.start)
+        self.player.vx = self.player.vy = 0
+        for g in self.watchmen:
+            if not g.route:
+                continue
+            g.actor.x, g.actor.y = g.route[0]
+            g.mode = "patrol"
+            g.notice = 0
+            g.last_known = None
+            g.linger = g.repath = 0
+            g.path.clear()
+        self.exposure = 0
+        self.hidden = self.blending = False
+        self.cover_blown = bool(self.disguise)
+        self.scrutiny = 0
+        self.overlay = None
+        self.save()
+        self.redraw()
+
+    # -------- keyboard and pointer --------
+    def clear_held(self):
+        self.held.clear()
+        for job in list(self.release_jobs.values()):
+            try:
+                self.root.after_cancel(job)
+            except Exception:
+                pass
+        self.release_jobs.clear()
+
+    def key_down(self, event):
+        k = event.keysym.lower()
+        if k in self.release_jobs:
+            try:
+                self.root.after_cancel(self.release_jobs.pop(k))
+            except Exception:
+                pass
+        # Keep the Entry entirely in control of its own typed text.
+        if self.screen == "profile" and self.name_entry is not None and self.root.focus_get() == self.name_entry:
+            if k == "return":
+                self.confirm_profile()
+            return
+        if self.screen == "game" and self.overlay is None:
+            if k in {"w", "a", "s", "d", "up", "down", "left", "right", "control_l", "control_r"}:
+                self.held.add(k)
                 return
-        # World clicks deliberately do not place, mine, upgrade or attack.
+            if k == "e":
+                self.interact()
+            elif k == "j":
+                self.open_overlay("journal")
+            elif k in {"tab", "i"}:
+                self.open_overlay("board")
+            elif k == "h":
+                self.toggle_hide()
+            elif k == "b":
+                self.toggle_blend()
+            elif k == "v":
+                self.focus = True
+            elif k == "q":
+                self.try_drop_coin()
+            elif k == "escape":
+                self.go_back()
+            elif k == "space":
+                self.interact()
+        elif self.screen == "game" and self.overlay is not None:
+            if k == "escape":
+                self.go_back()
+            elif k in {"space", "return"}:
+                if self.overlay == "cinematic":
+                    self.advance_cinematic()
+                elif self.overlay == "dialogue":
+                    self.advance_dialogue()
+                elif self.overlay == "confront" and self.confront_step < 4:
+                    self.advance_confrontation()
+                elif self.overlay == "evidence":
+                    self.close_overlay()
+                elif self.overlay == "deduce_result":
+                    self.open_overlay("board")
+            elif self.overlay == "deduce" and k in {"1", "2", "3"}:
+                self.answer_deduction(int(k) - 1)
+        elif k == "escape" and self.screen in {"select", "help", "profile"}:
+            self.go_back()
 
-    def action(self,action):
-        kind = action[0]
-        if kind=='supply':
-            self.world.claim_supply(action[1])
-        elif kind=='drill':
-            self.world.buy_drill()
-        elif kind=='levels':
-            self.state = 'levels'
-        elif kind=='title':
-            self.transition_to(('title',))
-        elif kind=='start':
-            self.transition_to(action)
-        elif kind=='shop_page':
-            self.blueprint_page=action[1]
-        elif kind=='category':
-            self.category = action[1]
-        elif kind=='blueprint':
-            self.choose_blueprint(action[1])
-        elif kind=='close':
-            self.panel = None
-            self.keys.clear()
-        elif kind=='resume':
-            self.paused = False
-            self.keys.clear()
-        elif kind=='pause':
-            self.paused = True
-            self.keys.clear()
-        elif kind=='help':
-            self.panel = ('help',None)
-            self.keys.clear()
-        elif kind=='quality':
-            self.quality = not self.quality
-        elif kind=='nextwave':
-            if distance(self.world.player.pos,self.world.corepos)<=1.95:
-                self.world.start_wave()
-                self.panel = None
-        elif kind=='auto':
-            if distance(self.world.player.pos,self.world.corepos)<=1.95:
-                self.world.autoplay = True
-        elif kind=='upgrade':
-            if self.world.request_upgrade(action[1],action[2]):
-                self.panel = None
-                self.keys.clear()
-        elif kind=='repair':
-            if self.world.request_repair(action[1]):
-                self.panel = None
-                self.keys.clear()
-        elif kind=='gate':
-            b = self.world.buildings.get(action[1])
-            if b and distance(self.world.player.pos,b.pos)<=1.75:
-                if b.opened and not self.world.core_routes_open(action[1]):
-                    self.world.say('This gate must stay open so bugs can reach the core.')
-                else:
-                    b.opened = not b.opened
-                    self.world.repath()
-        elif kind=='sell':
-            key = action[1]
-            b = self.world.buildings.get(key)
-            if b and distance(self.world.player.pos,b.pos)<=1.75 and key not in self.world.orders:
-                self.world.sell(key)
-                self.panel = None
+    def key_up(self, event):
+        k = event.keysym.lower()
+        if k == "v":
+            self.focus = False
+        # Windows/Linux OS key repeat fires Release/Press pairs between actual
+        # releases; a small grace period avoids stuttering while keys are held.
+        if k in self.held:
+            def remove(key=k):
+                self.held.discard(key)
+                self.release_jobs.pop(key, None)
+            self.release_jobs[k] = self.root.after(35, remove)
 
-    def transition_to(self,action):
-        self.transition = {'age':0.,'action':action,'switched':False}
-        self.keys.clear()
+    def motion(self, event):
+        self.mouse = (event.x, event.y)
 
-    def new_level(self,index,tutorial=False):
-        self.world = FieldWorld(index,tutorial)
-        self.state = 'play'
-        self.paused = False
-        self.panel = None
-        self.blueprint = None
-        self.camera = FollowCamera()
-        self.camera.x,self.camera.y = self.world.player.pos
-        self.accumulator = 0
-        self.keys.clear()
-        self.reset_decor()
+    def click(self, event):
+        xy = (event.x, event.y)
+        for (x1, y1, x2, y2), callback in reversed(self.buttons):
+            if x1 <= xy[0] <= x2 and y1 <= xy[1] <= y2:
+                callback()
+                return
+        # Optional direct walking by pointing to a position on the map.
+        if self.screen == "game" and self.overlay is None:
+            if VIEW_X <= xy[0] <= VIEW_X + VIEW_W and VIEW_Y <= xy[1] <= VIEW_Y + VIEW_H:
+                self.click_destination = self.screen_to_world(*xy)
+                self.click_path = self.nav.path(self.player.feet, self.click_destination)
+                if not self.click_path:
+                    self.click_destination = None
 
-    def draw_robot(self, b, x, y, scale=1):
-        role = b.role
-        c = b.spec['color']
-        s = scale
-        angle = b.angle
-        t = self.real_time
-        kick=getattr(b,'visual_recoil',0)
-        breathe=math.sin(t*2.5+b.x)*.65
+    def wheel(self, event):
+        if self.overlay == "journal":
+            self.ui_scroll = max(0, self.ui_scroll + (-1 if event.delta > 0 else 1))
+            self.redraw()
 
-        def rr(dx, dy, w, h, color, o='', radius=3):
-            if role not in ('wall','gate','generator','mine','shield') and dy<5:
-                dx-=math.cos(angle)*kick*.3
-                dy-=math.sin(angle)*kick*.3+breathe*.35
-            return self.roundrect(x+dx*s,y+dy*s,w*s,h*s,color,o,radius*s)
+    # -------- scheduled animation and rendering --------
+    def update(self):
+        now = time.perf_counter()
+        dt = clamp(now - self.last_tick, 0.001, 0.085)
+        self.last_tick = now
+        self.time_alive += dt
+        self.tick_count += 1
+        if self.toast_timer > 0:
+            self.toast_timer = max(0, self.toast_timer - dt)
+        if self.alert_caption_timer > 0:
+            self.alert_caption_timer = max(0, self.alert_caption_timer - dt)
+        if self.screen == "game" and self.overlay == "room_transition":
+            # Use elapsed wall time: a slower computer must not stretch a
+            # 1.7-second passage transition into several seconds.
+            self.transition_time = time.perf_counter() - self.transition_started_at
+            if self.transition_time >= self.transition_duration * 0.57 and not self.transition_switched:
+                self.transition_switched = True
+                self.switch_room(self.transition_to)
+                self.canvas.delete("room_transition_fx")
+            if self.transition_time >= self.transition_duration:
+                self.canvas.delete("room_transition_fx")
+                self.overlay = None
+                self.transition_to = None
+                self.redraw()
+            elif self.tick_count % 2 == 0:
+                self.draw_room_transition()
+        if self.screen == "game" and self.overlay is None:
+            self.update_player(dt)
+            self.update_guard(dt)
+            if self.tick_count % 80 == 0:
+                self.cache_progress()
+        # Menu rain and game movement animate continuously, while dialogs stop
+        # the world so the player can actually read at their own pace.
+        if self.screen == "game" and self.overlay is None:
+            try:
+                self.redraw()
+            except (tk.TclError, ValueError, IndexError, StopIteration) as exc:
+                import traceback
+                traceback.print_exc()
+                self.toast("A scene error was recovered. Your case progress is intact.")
+                self._scene_ready = False
+        # Measure how long this frame actually took and subtract that work
+        # from the 30-fps budget. The old loop waited a whole frame AFTER
+        # drawing, causing avoidable visible slowdowns on slower machines.
+        elapsed_ms = (time.perf_counter() - now) * 1000.0
+        budget_ms = STEP_INTERVAL * 1000.0
+        target = max(1, round(budget_ms - elapsed_ms))
+        if self.screen != "game":
+            target = 90  # Menus aren't animated; don't burn CPU offscreen.
+        elif self.overlay not in (None, "room_transition"):
+            target = 55  # Paused dialogue / evidence doesn't need 30 updates.
+        self.root.after(target, self.update)
 
-        def oval(dx, dy, w, h, color, o='', width=1):
-            return self.oval(x + dx * s, y + dy * s, w * s, h * s, color, o, width * s)
-
-        def line(pts, color, width=1):
-            return self.line([(x + xx * s, y + yy * s) for xx, yy in pts], color, width * s)
-
-        def poly(pts, color, o=''):
-            return self.polygon([(x + xx * s, y + yy * s) for xx, yy in pts], color, o, 0.7 * s)
-        light = tint(c, '#f1fcf0', 0.5)
-        dark = tint(c, '#182e3c', 0.5)
-        oval(-19, 8, 39, 15, '#718569')
-        oval(-14, 10, 30, 9, '#5e755f')
-        if role == 'wall':
-            for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-                n = self.world.buildings.get((b.x + dx, b.y + dy))
-                if n and n.role in ('wall', 'gate'):
-                    rr(-9 + dx * 11, -7 + dy * 10, 18, 19, '#738898', radius=1)
-            rr(-15, -12, 30, 28, '#536e7e', '#a4bdc3', 2)
-            rr(-15, -15, 30, 9, '#c0cdd0', radius=2)
-            rr(-12, -12, 24, 2, '#e3e8d5', radius=1)
-            for yy in (-1, 7):
-                line([(-13, yy), (13, yy)], '#354e5f', 1)
-            for xx in (-12, 12):
-                rr(xx, -9, 3, 22, '#849ba7', radius=1)
-            for xx in (-7, 3):
-                poly([(xx, -3), (xx + 4, -3), (xx, 4), (xx - 4, 4)], '#e6bd79')
+    def redraw(self):
+        if not self.canvas.winfo_exists():
             return
-        if role == 'gate':
-            for xx in (-16, 9):
-                rr(xx, -17, 7, 34, '#5e7c8b', '#b0c6cc', 2)
-                rr(xx + 1, -14, 5, 4, '#a9dfc1' if b.opened else '#edc487', radius=1)
-            retract = 11 if b.opened else 0
-            for side in (-1, 1):
-                xx = (-9 if side < 0 else 0) + side * retract
-                rr(xx, -11, 9, 24, '#a7b5b3', '#dfdcbd', 1)
-                line([(xx + 2, 8), (xx + 7, -5)], '#eac484', 3)
-            line([(-10, 17), (10, 17)], '#778e88', 2)
-            return
-        if role == 'generator':
-            rr(-16, -5, 32, 24, '#416775', '#8eb7bc', 4)
-            for xx in (-14, 10):
-                rr(xx, -13, 5, 23, '#8caeb2', radius=2)
-            oval(-12, -17, 24, 26, '#395669', '#bddbdb', 1)
-            oval(-9, -14, 18, 20, '#81cfcc', '#d7fff0', 1)
-            for i in range(3):
-                a = t * 2.4 + i * math.tau / 3
-                line([(0, -4), (math.cos(a) * 8, -4 + math.sin(a) * 8)], '#e2ffe5', 2)
-            rr(-10, 11, 20, 4, '#9fe3b0', radius=1)
-            for xx in (-10, -3, 4):
-                rr(xx, 12, 3, 2, '#d8ffd8', radius=0)
-            return
-        if role == 'mine':
-            rr(-16, -3, 32, 23, '#4e6875', radius=3)
-            for xx in (-17, 11):
-                rr(xx, 6, 7, 13, '#7f949c', radius=2)
-            rr(-15, -7, 30, 7, c, radius=2)
-            line([(-10, 1), (-4, -20), (9, -20), (12, 9)], light, 4)
-            line([(-8, 1), (-3, -17), (7, -17), (10, 9)], dark, 1)
-            yy = 6 + math.sin(t * 9) * 3
-            poly([(6, yy), (14, yy), (10, yy + 10)], '#b7c5c0')
-            for i in range(3):
-                line([(6, yy + i * 2), (13, yy + i * 2 + 2)], '#526b76', 1)
-            oval(-6, -9, 10, 10, '#799495', '#dccf9e')
-            return
-        if role == 'shield':
-            rr(-12, 1, 24, 20, '#4d5f7c', '#a8b1ce', 4)
-            for xx in (-10, 5):
-                rr(xx, -11, 5, 18, '#8a88b6', radius=2)
-            poly([(-9, -13), (0, -27), (9, -13), (0, 2)], '#a995dc', '#ddd0ff')
-            poly([(0, -27), (0, 2), (9, -13)], '#8675b6')
-            line([(-5, -12), (0, -21), (0, -3)], '#eee7ff', 1)
-            for i in range(2):
-                a = t * 2 + i * math.pi
-                oval(math.cos(a) * 12 - 2, -11 + math.sin(a) * 4 - 2, 4, 4, '#dacaff')
-            return
-        chassis = b.spec['chassis']
-        if chassis in ('tank', 'crawler', 'rover', 'rig'):
-            for side in (-1, 1):
-                xx = -17 if side < 0 else 10
-                rr(xx, -11, 8, 31, '#293e4d', '#7d98a6', 3)
-                if chassis == 'rover':
-                    for yy in (-9, 9):
-                        rr(xx - 1, yy, 10, 10, '#263b48', radius=3)
-                        rr(xx + 1, yy + 2, 6, 5, '#92a6ae', radius=2)
-                else:
-                    for yy in range(-8, 18, 5):
-                        line([(xx + 1, yy), (xx + 7, yy)], '#617a88', 1.5)
-            poly([(-12, -10), (10, -10), (15, -3), (13, 15), (-12, 16), (-15, 4)], dark, '#bdd0d4')
-            poly([(-10, -11), (8, -11), (12, -5), (9, 1), (-11, 1)], light)
-            for xx in (-10, 7):
-                rr(xx, 7, 4, 6, c, radius=1)
-        elif chassis == 'walker':
-            for side in (-1, 1):
-                for yy in (-1, 1):
-                    line([(side * 6, yy * 5), (side * 14, yy * 11), (side * 19, yy * 18)], '#344b5b', 5)
-                    line([(side * 6, yy * 5), (side * 14, yy * 11)], light, 2)
-                    oval(side * 14 - 3, yy * 11 - 3, 6, 6, '#8ba9b4')
-                    rr(side * 19 - 4, yy * 18 - 2, 8, 5, '#4f6878', radius=2)
-            poly([(-9, -10), (8, -10), (12, -3), (10, 10), (-10, 10), (-12, -3)], c, '#d6e2df')
-            rr(-5, -7, 10, 9, dark, radius=2)
+        if self.screen == "game":
+            self.draw_game_scene()
         else:
-            heavy = chassis == 'heavy'
-            for side in (-1, 1):
-                xx = side * 7
-                rr(xx - 3, 5, 6, 12, '#41596c', radius=2)
-                rr(xx - 3, 10, 6, 5, c, radius=1)
-                rr(xx - 5, 17, 11, 5, '#b5c8cf', radius=2)
-                line([(xx - 3, 17), (xx + 4, 17)], '#e6ecde', 1)
-            poly([(-12 if heavy else -9, -9), (12 if heavy else 9, -9), (14 if heavy else 10, 4), (8, 12), (-8, 12), (-14 if heavy else -10, 4)], c, '#ccdfe1')
-            poly([(-9, -8), (8, -8), (6, -2), (-6, -2)], light)
-            rr(-5, 1, 10, 6, dark, radius=2)
-            for side in (-1, 1):
-                rr(side * 14 - 4, -8, 9 if heavy else 7, 13, c, light, 2)
-                rr(side * 14 - 2, 4, 5, 8, '#455e70', radius=2)
-            oval(-2, 2, 4, 4, '#e2f7ca')
-        rr(-4, -14, 8, 5, '#4d6577', radius=1)
-        rr(-9, -24, 18, 13, '#c6d8db', '#edf4e8', 4)
-        rr(-7, -20, 14, 6, '#294a60', radius=2)
-        line([(-5, -18), (4, -18)], '#8aede7', 1.4)
-        for xx in (-11, 8):
-            rr(xx, -20, 3, 6, c, radius=1)
-        line([(-5, -24), (4, -24)], '#f1f7eb', 1)
-        recoil = kick+5*min(1,b.animation/.12)
-
-        def wp(px, py):
-            return (math.cos(angle) * (px - recoil) - math.sin(angle) * py, math.sin(angle) * (px - recoil) + math.cos(angle) * py)
-
-        def gunpoly(points, cc, oo=''):
-            poly([wp(*q) for q in points], cc, oo)
-
-        def gunline(points, cc, ww=1):
-            line([wp(*q) for q in points], cc, ww)
-        if role == 'repair':
-            arm_swing=math.sin(t*4+b.x)*7
-            line([(7,3),(19,-8+arm_swing),(25,2+arm_swing)],'#496b79',4)
-            line([(7,3),(19,-8+arm_swing)],'#b8d6d1',2)
-            line([(25,2+arm_swing),(20,6+arm_swing),(23,10+arm_swing)],'#a1e4bc',2)
-            line([(25,2+arm_swing),(30,6+arm_swing),(27,10+arm_swing)],'#a1e4bc',2)
-            rr(-8, -1, 12, 10, '#4d8b80', radius=2)
-            line([(-5, 4), (1, 4)], '#e0fce3', 2)
-            line([(-2, 1), (-2, 7)], '#e0fce3', 2)
-        elif role == 'command':
-            line([(10, 1), (13, -33)], '#4c667d', 2)
-            oval(4+math.sin(t*2)*3,-36,18,4+abs(math.cos(t*2))*7,'#a8bfd0','#deeddf')
-            line([(13, -36), (13, -42)], '#c6dee5', 1)
-            rr(-7, 0, 14, 8, '#476b96', radius=2)
-            for i in range(3):
-                rr(-5 + i * 4, 2, 2, 3, '#c0e7eb', radius=0)
-            if math.sin(t * 3) > 0.5:
-                oval(11, -43, 4, 4, '#b1eeca')
-        elif role == 'rocket':
-            for side in (-1, 1):
-                rr(side * 10 - 5, -5, 10, 18, '#415b68', light, 2)
-                for yy in (-2, 5):
-                    oval(side * 10 - 3, yy, 6, 6, '#1d3545', '#e5c18b')
-            rr(-5, -2, 10, 12, c, radius=2)
-        elif role == 'mortar':
-            line([(-10, 9), (2, -10), (12, 9)], '#3d5769', 4)
-            barrel_y=-24+kick*1.2
-            line([(0,2),(9,barrel_y)],'#3b5367',12)
-            line([(0,2),(9,barrel_y)],'#afbac1',8)
-            oval(3,barrel_y-5,13,8,'#253e50','#d1dbd4',2)
-            oval(6,barrel_y-3,7,4,'#152a3c')
-            rr(-8, 2, 15, 10, '#b78e8d', radius=2)
-        elif role == 'cryo':
-            for xx in (-11, 5):
-                rr(xx, -7, 7, 19, '#365f78', '#98c9d3', 3)
-                rr(xx + 1, -3, 5, 11, '#9be4e3', radius=2)
-                line([(xx + 2, -1), (xx + 2, 5)], '#e5ffff', 1)
-            gunpoly([(3, -5), (19, -5), (23, -8), (26, -6), (26, 6), (23, 8), (19, 5), (3, 5)], '#527b8b', '#c2eaeb')
-            gunline([(22, -5), (22, 5)], '#b6f4ef', 2)
-        elif role == 'flame':
-            rr(-8, -4, 14, 17, '#e1a66f', '#e8d0a2', 3)
-            for xx in (-6, 1):
-                rr(xx, -2, 4, 12, '#a8664b', radius=2)
-            gunpoly([(4, -4), (20, -4), (25, -7), (27, -6), (27, 6), (25, 7), (20, 4), (4, 4)], '#52626b', '#bdcac9')
-            gunline([(21, 0), (28, 0)], '#ecb072', 3)
-            tip = wp(29, 0)
-            oval(tip[0] - 2, tip[1] - 2, 4, 4, '#ffce7a')
-        elif role == 'rail':
-            for side in (-1, 1):
-                gunpoly([(0, side * 3), (27, side * 3), (30, side * 6), (0, side * 6)], '#526f85', '#b7d7de')
-                gunline([(4, side * 4), (27, side * 4)], '#8fe4ed', 1.5)
-            for xx in (8, 14, 20):
-                gunline([(xx, -7), (xx, 7)], '#8ba8bc', 1)
-        elif role == 'heavy':
-            gunpoly([(1, -6), (13, -6), (19, -4), (19, 4), (13, 6), (1, 6)], '#40586b', '#b6cad1')
-            for i in range(3):
-                shift=math.sin(t*(40 if b.animation else 3)+i*math.tau/3)*4
-                gunline([(12,shift),(27,shift)],'#546d7e',2.2)
-            gunline([(23, -5), (23, 5)], '#b0c4c9', 2)
-        elif role == 'sniper':
-            gunpoly([(1, -4), (13, -4), (15, -2), (34, -2), (34, 2), (13, 3), (1, 4)], '#405568', '#b7c5ce')
-            gunline([(10, -6), (19, -6)], '#9b82be', 3)
-            gunline([(30, -3), (35, -3)], '#d5dce0', 1)
-        elif role == 'air':
-            for shift in (-4, 4):
-                gunline([(3, shift), (26, shift)], '#526a79', 3)
-            rr(-8, -3, 15, 12, c, radius=2)
-            line([(-4, -18), (-2, -31), (4, -34), (8, -31)], '#b8cad3', 1)
-        elif role == 'scatter':
-            gunpoly([(1, -5), (12, -5), (16, -4), (23, -4), (23, 4), (16, 4), (12, 5), (1, 5)], '#4e5c70', '#c5d0d5')
-            gunline([(19, -5), (19, 5)], '#e3a3c4', 2)
-        else:
-            gunpoly([(0, -4), (12, -4), (14, -2), (23, -2), (23, 2), (12, 4), (0, 4)], '#3d5668', '#c5d7da')
-            gunline([(15, -3), (21, -3)], c, 2)
-        if b.paths[0] >= 2:
-            for xx in (-7, 6):
-                rr(xx, 6, 3, 7, '#f3d585', radius=1)
-        if b.paths[1] >= 2:
-            rr(-7, 0, 14, 3, '#c0aff3', radius=1)
-        for path, n in enumerate(b.paths):
-            for i in range(n):
-                oval(-9 + i * 7, 25 + path * 4, 4, 3, COLORS['gold'] if path == 0 else COLORS['purple'])
-        if b.shield:
-            rr(-23, -29, 46, 57, '', '#c4b8fa', 10)
-            line([(-22, -15), (-22, -23), (-13, -28)], '#ece3ff', 1)
-        if b.jam:
-            line([(-10, -33), (-4, -37), (2, -33), (10, -37)], '#e1c88e', 1.5)
-
-    def draw_bug(self, e, x, y, scale=1):
-        """Anatomical silhouettes, articulated legs, shiny carapaces and wingbeats."""
-        r = BUGS[e.name][3] * scale
-        a = e.angle
-        t = self.real_time
-        walk_phase=getattr(e,'walk_phase',t*9+e.x)
-        walking=getattr(e,'walk_blend',1.)
-        if e.stun:walking=0.
-        strike_clock=getattr(e,'attack_clock',0)
-        strike_length=max(.1,getattr(e,'attack_length',.42))
-        strike=math.sin((1-strike_clock/strike_length)*math.pi) if strike_clock else 0.
-        stride=math.sin(walk_phase)*walking
-        leap_clock=getattr(e,'leap_clock',0)
-        leap=math.sin((1-leap_clock/.5)*math.pi) if leap_clock else 0.
-        fly = e.flying
-        bob=(math.sin(t*6+e.y)*4 if fly else abs(stride)*1.6)*scale
-        y+=bob-leap*24*scale
-        x+=math.cos(a)*strike*r*.42
-        y+=math.sin(a)*strike*r*.42
-        a+=stride*.085 if not fly else math.sin(t*3+e.x)*.035
-        color = BUGS[e.name][4]
-        light = tint(color, '#fff2bf', 0.38)
-        dark = tint(color, '#1c312d', 0.45)
-
-        def p(dx, dy):
-            # Abdomen, thorax and head flex separately rather than sliding as one image.
-            if dx<-.25:
-                dy+=math.sin(walk_phase-.65)*.16*walking*(-dx)
-                dx*=1+strike*.07
-            elif dx>.48:
-                dy+=math.sin(walk_phase+.8)*.07*walking
-                dx+=strike*.19
-                dy*=1+strike*.12
-            return (x+(math.cos(a)*dx-math.sin(a)*dy)*r,
-                    y+(math.sin(a)*dx+math.cos(a)*dy)*r)
-
-        def poly(points, c, outline='', width=1, smooth=False):
-            pts = [p(dx, dy) for dx, dy in points]
-            self.canvas.create_polygon(*[v for q in pts for v in q], fill=c, outline=outline, width=width * self.scale * scale, smooth=smooth, splinesteps=6)
-
-        def line(points, c, width=1):
-            self.line([p(*q) for q in points], c, width * scale)
-
-        def ellipse(cx, cy, rx, ry, c, outline='', smooth=True):
-            poly([(cx + math.cos(i * math.tau / 12) * rx, cy + math.sin(i * math.tau / 12) * ry) for i in range(12)], c, outline, 0.7, smooth)
-
-        def shell(cx, cy, rx, ry, c):
-            ellipse(cx, cy, rx, ry, tint(c, '#172f2a', 0.4))
-            ellipse(cx - 0.06, cy - 0.04, rx * 0.94, ry * 0.92, c)
-            ellipse(cx - 0.16, cy - 0.16, rx * 0.65, ry * 0.52, tint(c, '#fcf3c5', 0.25))
-            line([(cx - rx * 0.55, cy - ry * 0.3), (cx - rx * 0.15, cy - ry * 0.55)], tint(c, '#f7ffdf', 0.65), 0.9)
-        shadow_y = y + 8 * scale + (7 * scale if fly else 0)
-        self.oval(x - r * 1.05, shadow_y - r * 0.4, r * 2.1, r * 0.8, '#7e906f')
-        self.oval(x - r * 0.8, shadow_y - r * 0.26, r * 1.6, r * 0.52, '#6e8267')
-        for side in (-1, 1):
-            for index, root in enumerate((-0.35, 0.1, 0.5)):
-                if e.name == 'Mantis' and index == 2:
-                    continue
-                leg_angle=walk_phase+index*math.pi*.76+(0 if side==1 else math.pi)
-                phase=math.sin(leg_angle)*.55*walking
-                lift=max(0,math.cos(leg_angle))*.34*walking
-                if e.stun:
-                    phase = 0
-                knee=(root-.15+phase*.55,side*((.85 if e.name!='Grasshopper' else 1.1)-lift*.5))
-                foot=(root-.4-phase,side*((1.32 if e.name!='Grasshopper' else 1.65)-lift))
-                if e.name == 'Grasshopper' and index == 0:
-                    knee = (0.55, side * 1.05)
-                    foot = (-1.05+phase*1.5,side*(1.65-lift))
-                line([(root, side * 0.2), knee, foot], dark, 2.3)
-                line([(root, side * 0.2), knee], light, 1.0)
-                ellipse(knee[0], knee[1], 0.075, 0.075, light)
-        if fly:
-            flutter = .16+abs(math.sin(t*(31 if e.name=='Dragonfly' else 24)+e.y)) * 1.35
-            for side in (-1, 1):
-                for offset in (-0.25, 0.36) if e.name == 'Dragonfly' else (0,):
-                    points = [(offset + 0.35, side * 0.12), (offset + 0.2, side * 1.05 * flutter), (offset - 0.8, side * 1.85 * flutter), (offset - 1.15, side * 1.45 * flutter), (offset - 0.35, side * 0.15)]
-                    poly(points, '#cbded1', '#87b1a9', 0.6, True)
-                    line([(offset + 0.2, side * 0.2), (offset - 0.6, side * 1.5 * flutter)], '#a3c1b1', 0.6)
-        if e.name == 'Ant':
-            shell(-0.82, 0, 0.67, 0.52, color)
-            shell(0.04, 0, 0.32, 0.29, color)
-            line([(-0.38, -0.12), (0.28, -0.12)], dark, 2)
-            shell(0.62, 0, 0.43, 0.37, color)
-        elif e.name == 'Termite':
-            shell(-0.6, 0, 0.8, 0.47, '#d2bd91')
-            for i in range(5):
-                line([(-1 + i * 0.25, -0.38), (-1 + i * 0.25, 0.38)], '#ac966c', 0.7)
-            shell(0.45, 0, 0.42, 0.36, '#ba955e')
-            for side in (-1, 1):
-                line([(0.72, side * 0.14), (1.07, side * 0.32), (1.18, side * 0.08)], '#6c5a3e', 1.8)
-        elif e.name == 'Wasp':
-            shell(-0.65, 0, 0.82, 0.42, '#edc650')
-            for dx in (-1.1, -0.73, -0.35):
-                line([(dx, -0.34), (dx, 0.34)], '#554c37', 2.4)
-            poly([(-1.36, -0.09), (-1.72, 0), (-1.36, 0.09)], '#5b5741')
-            shell(0.22, 0, 0.43, 0.35, '#b29b4d')
-            shell(0.7, 0, 0.31, 0.29, '#d6b74c')
-        elif e.name == 'Dragonfly':
-            poly([(0.2, -0.19), (-1.9, -0.06), (-2.05, 0), (-1.9, 0.06), (0.2, 0.19)], '#4e9ca6', '#427e83')
-            for i in range(7):
-                line([(-0.2 - i * 0.23, -0.09), (-0.2 - i * 0.23, 0.09)], '#a3d5c4', 0.8)
-            shell(0.26, 0, 0.43, 0.29, '#74b2ae')
-            for side in (-1, 1):
-                shell(0.73, side * 0.22, 0.29, 0.24, '#a0cf99')
-        elif e.name == 'Mantis':
-            shell(-0.73, 0, 0.82, 0.33, '#83ac69')
-            poly([(-1.25, 0), (-0.3, -0.32), (0.25, 0), (-0.3, 0.32)], '#a3c07c', '#688956')
-            poly([(-0.05, -0.15), (0.9, -0.17), (1.0, 0), (0.9, 0.17), (-0.05, 0.15)], '#7fa65f', '#577c4b')
-            poly([(0.8, -0.48), (1.3, 0), (0.8, 0.48), (0.64, 0.12), (0.64, -0.12)], '#a0c57d', '#628954')
-            for side in (-1, 1):
-                bend = .25*math.sin(t*3)+strike*.65
-                line([(0.5, side * 0.2), (1.2, side * (0.95 + bend)), (1.5+strike*.65, side*(.25-strike*.12))], '#597c47', 3)
-                line([(0.5, side * 0.2), (1.2, side * (0.95 + bend))], '#acd08b', 1.7)
-                for i in range(3):
-                    line([(1.25 + i * 0.07, side * (0.8 - i * 0.16)), (1.15 + i * 0.07, side * (0.73 - i * 0.16))], '#d3dda5', 0.8)
-        elif e.name == 'Grasshopper':
-            shell(-0.65, 0, 0.9, 0.39, '#8cab59')
-            poly([(-1.4, 0), (0.2, -0.34), (0.5, 0), (0.2, 0.34)], '#a5bd72', '#718e4c')
-            line([(-1.25, 0), (0.4, 0)], '#d7d99a', 1)
-            shell(0.55, 0, 0.42, 0.37, '#a2bb6a')
-        elif e.name == 'Moth':
-            flap = .24+.95*(.5+.5*math.sin(t*13+e.x))
-            for side in (-1, 1):
-                poly([(0.65, 0), (0.65, side * 1.5 * flap), (-0.12, side * 1.7 * flap), (-1.3, side * 0.84 * flap), (-0.45, 0)], '#bca98c', '#897c63', 0.9, True)
-                poly([(0.4, side * 0.3), (0.44, side * 1.25 * flap), (-0.1, side * 1.4 * flap), (-0.95, side * 0.74)], '#d6c5a5', '', 1, True)
-                ellipse(-0.15, side * 0.93 * flap, 0.29, 0.24, '#8a8168')
-                ellipse(-0.15, side * 0.93 * flap, 0.16, 0.14, '#d8cba7')
-                ellipse(-0.15, side * 0.93 * flap, 0.07, 0.07, '#625e4c')
-                line([(0.45, side * 0.3), (-0.1, side * 1.2 * flap)], '#a7997c', 0.8)
-            shell(-0.23, 0, 0.8, 0.22, '#a08c6d')
-            shell(0.55, 0, 0.32, 0.3, '#c8b896')
-        elif e.name == 'Cockroach':
-            shell(-0.25, 0, 1.03, 0.52, '#9d754c')
-            for i in range(7):
-                line([(-1 + i * 0.24, -0.4), (-1 + i * 0.24, 0.4)], '#7c603e', 0.6)
-            poly([(-1.1, 0), (0.45, -0.4), (0.55, 0.0), (0.45, 0.4)], '#af8b60', '#826440', 0.5, True)
-            line([(-1.05, 0), (0.5, 0)], '#d0ac78', 0.8)
-            shell(0.65, 0, 0.35, 0.39, '#85663f')
-        else:
-            c = '#d9674f' if e.name == 'Ladybug' else color
-            if e.name == 'Bombardier Beetle':
-                c = '#647d68'
-            shell(-0.35, 0, 0.95, 0.69, c)
-            line([(-1.22, 0), (0.35, 0)], dark, 1.2)
-            for side in (-1, 1):
-                line([(-1.05, side * 0.2), (-0.65, side * 0.47), (-0.15, side * 0.5), (0.26, side * 0.3)], tint(c, '#f4f2bc', 0.35), 0.7)
-            shell(0.48, 0, 0.42, 0.46, '#c99a64' if e.name == 'Bombardier Beetle' else tint(c, '#374c38', 0.25))
-            shell(0.88, 0, 0.29, 0.33, tint(c, '#253b30', 0.35))
-            if e.name == 'Ladybug':
-                for dx, dy in ((-0.85, -0.3), (-0.85, 0.3), (-0.3, -0.4), (-0.3, 0.4), (0.1, -0.25), (0.1, 0.25)):
-                    ellipse(dx, dy, 0.15, 0.12, '#493d32')
-            if e.name in ('Stag Beetle', 'Goliath Beetle'):
-                for side in (-1, 1):
-                    poly([(0.8,side*.25),(1.2,side*(.6+strike*.3)),(1.7,side*(.47+strike*.35)),(1.82,side*(.1+strike*.27)),(1.48,side*(.29+strike*.2)),(1.2,side*.25)], tint(c, '#554c37', 0.2), dark, 0.6, True)
-                if e.name == 'Goliath Beetle':
-                    for side in (-1, 1):
-                        for i in range(3):
-                            line([(-0.98 + i * 0.4, side * 0.48), (-0.85 + i * 0.4, side * 0.62), (-0.57 + i * 0.4, side * 0.52)], '#c4bd94', 1)
-                    for i in range(4):
-                        line([(-1 + i * 0.27, -0.38), (-1 + i * 0.27, 0.38)], '#aaa27a', 0.7)
-        if e.name in ('Ant','Termite','Cockroach'):
-            for side in (-1,1):
-                jaw=.16+strike*.3
-                line([(1.,side*.12),(1.23,side*jaw),(1.38,side*.08)],dark,1.5)
-        head = 0.87 if e.name not in ('Mantis', 'Dragonfly') else 1.1 if e.name == 'Mantis' else 0.83
-        for side in (-1, 1):
-            long = 1.3 if e.name == 'Cockroach' else 0.7
-            line([(head, side * 0.2), (head + 0.3, side * 0.47), (head + long, side * (0.7 + 0.08 * math.sin(t * 3)))], dark, 0.8)
-            ellipse(head + 0.05, side * 0.24, 0.095, 0.095, '#252f25')
-            ellipse(head + 0.07, side * 0.26, 0.03, 0.03, '#e7eec7')
-        if e.slow_time:
-            self.oval(x - r * 1.2, y - r * 1.2, r * 2.4, r * 2.4, '', '#a8edee', 1)
-            for i in range(3):
-                aa = t + i * 2.1
-                px = x + math.cos(aa) * r
-                py = y + math.sin(aa) * r
-                self.polygon([(px, py - 3), (px + 2, py), (px, py + 3), (px - 2, py)], '#d3fbf0')
-        if e.burn_time:
-            for i in range(4):
-                px = x + math.sin(i * 4 + t * 9) * r * 0.5
-                py = y + math.cos(i * 3) * r * 0.3
-                self.polygon([(px - 3, py + 2), (px - 4, py - 4), (px, py - 11 - i % 2 * 4), (px + 3, py - 3), (px + 3, py + 2)], '#efae6c')
-                self.oval(px - 1, py - 5, 3, 6, '#ffdf92')
-        if e.stun:
-            for i in range(3):
-                aa = t * 3 + i * 2.1
-                px = x + math.cos(aa) * r * 0.7
-                py = y - r - 5 + math.sin(aa) * 2
-                self.text(px, py, '+', 10, '#e4fff0', True, anchor='center')
-        if e.marked:
-            rr = r + 4
-            for side in (-1, 1):
-                self.line([(x + side * rr, y - 4), (x + side * rr, y - rr), (x + side * (rr - 5), y - rr)], COLORS['purple'], 1)
-        if e.hp < e.maxhp:
-            self.roundrect(x - r, y - r - 11, r * 2, 4, '#536252', r=2)
-            self.roundrect(x - r, y - r - 11, max(0.2, r * 2 * e.hp / e.maxhp), 4, '#bcf1a6', r=2)
-
-    def draw_effect(self, f):
-        kind = f['kind']
-        progress = 1 - f['ttl'] / f['life']
-        x, y = self.point(f['pos'])
-        c = f['color']
-        if not self.quality:
-            if kind not in ('hit', 'muzzle', 'defeat'):
-                App.draw_effect(self, f)
-            return
-        if kind in ('explosion', 'defeat', 'hit'):
-            size = f['size'] * TILE
-            if kind == 'explosion':
-                r = size * (0.2 + progress)
-                for i in range(5):
-                    a = i * 2.4
-                    rr = (8 + progress * size * 0.35) * (1 - progress * 0.65)
-                    px = x + math.cos(a) * r * 0.45
-                    py = y + math.sin(a) * r * 0.4 - progress * 13
-                    self.oval(px - rr, py - rr, rr * 2, rr * 2, tint('#e6c388', '#a0a687', progress))
-                if progress < 0.5:
-                    rr = size * (0.4 - progress * 0.5)
-                    self.oval(x - rr, y - rr, rr * 2, rr * 2, '#ffdc8e')
-                    self.oval(x - rr * 0.5, y - rr * 0.5, rr, rr, '#fff3c2')
-                self.oval(x - r, y - r * 0.65, r * 2, r * 1.3, '', tint('#fff1a4', '#b2ba8d', progress), max(0.6, 3 * (1 - progress)))
-            for i in range(10 if kind == 'explosion' else 6):
-                a = i * 2.399
-                travel = size * (0.3 + progress * 1.3)
-                px = x + math.cos(a) * travel
-                py = y + math.sin(a) * travel - progress * 13 + progress * progress * 24
-                length = (1 - progress) * 6
-                self.line([(px, py), (px + math.cos(a) * length, py + math.sin(a) * length)], tint(c, '#f9dfaa', 0.4), 2 * (1 - progress) + 0.4)
-            return
-        if kind == 'build':
-            r = (0.3 + progress * 0.8) * TILE
-            self.oval(x - r, y - r * 0.5, 2 * r, r, '', tint(c, '#fff3ce', 0.5), 2 * (1 - progress) + 0.5)
-            for i in range(6):
-                a = i * math.tau / 6
-                px = x + math.cos(a) * TILE * 0.5
-                py = y + math.sin(a) * TILE * 0.3 - (1 - progress) * 30
-                self.roundrect(px - 2, py - 2, 4, 4, tint(c, '#fff4cd', 0.5), r=1)
-            return
-        if kind == 'upgrade':
-            for i in range(3):
-                rr = (progress + i * 0.25) % 1 * 40
-                self.oval(x - rr, y - rr * 0.5, rr * 2, rr, '', '#ffe4a5', 1.5)
-            for i in range(8):
-                a = i * 2.4
-                px = x + math.cos(a) * 22
-                py = y - progress * 50 + math.sin(a) * 10
-                self.polygon([(px - 2, py), (px, py - 4), (px + 2, py), (px, py + 4)], '#fff0b5')
-            return
-        super().draw_effect(f)
-
-    def draw_player(self):
-        p = self.world.player
-        x,y = self.point(p.pos)
-        z = self.camera.zoom
-        walk = math.sin(p.stride) if p.moving else math.sin(self.real_time*2)*.08
-        bob = abs(walk)*3.2*z
-        y -= bob
-        def rr(dx,dy,w,h,c,o='',radius=3):
-            self.roundrect(x+dx*z,y+dy*z,w*z,h*z,c,o,radius*z)
-        def line(points,c,width=1):
-            self.line([(x+a*z,y+b*z) for a,b in points],c,width*z)
-        def oval(dx,dy,w,h,c,o=''):
-            self.oval(x+dx*z,y+dy*z,w*z,h*z,c,o)
-        # Visible boots, alternating knees, bobbing backpack and independent arms.
-        oval(-15,8,30,13,'#6b8b70')
-        oval(-10,10,22,7,'#58775e')
-        for side in (-1,1):
-            swing=walk*side*8
-            lift=max(0,math.cos(p.stride+(0 if side==1 else math.pi)))*4 if p.moving else 0
-            foot_x=side*8+math.sin(p.stride+side*.8)*3 if p.moving else side*8
-            line([(side*6,5),(side*8+swing*.25,11+swing*.35),(foot_x,18+swing-lift)],'#415d6a',5)
-            rr(foot_x-4,17+swing-lift,10,5,'#d7dacc',radius=2)
-            line([(side*7-2,7),(side*7-2,12+swing)],'#98abb0',1)
-        rr(-12,-9,24,22,'#587a83','#b8cecb',5)
-        rr(-15,-7,6,18,'#76969b',radius=3)
-        rr(9,-7,6,18,'#76969b',radius=3)
-        rr(-10,-11,20,20,'#e4bb66','#f4dda2',4)
-        rr(-7,-7,14,4,'#ffe1a0',radius=2)
-        rr(-6,0,12,5,'#698e91',radius=2)
-        for i in range(3):
-            rr(-4+i*4,1,2,2,'#c6edda',radius=0)
-        if p.working and p.tool_target:
-            tx,ty = self.point(p.tool_target)
-            target_angle = math.atan2(ty-y,tx-x)
-            context=self.world.local_context()
-            mining=context is not None and context[0]=='deposit'
-            if mining:
-                target_angle+=math.sin(p.tool_time*10)*.8-.2
-            else:
-                target_angle+=math.sin(p.tool_time*9)*.2
-            arm=24+math.sin(p.tool_time*(10 if mining else 12))*5
-            ax,ay = math.cos(target_angle)*arm,math.sin(target_angle)*arm
-            line([(9,-3),(ax*.55,ay*.5-1),(ax,ay)],'#506f7c',5)
-            line([(9,-5),(ax*.55,ay*.5-3)],'#ecd098',3)
-            rr(ax-3,ay-3,7,7,'#b9d1d3',radius=2)
-            line([(ax-3,ay-3),(ax+4,ay+4)],'#f7e7aa',2)
-            line([(-11,-3),(-15,6)],'#d5af66',5)
-            # Tool sparks are localized to resources and construction, never bugs.
-            for i in range(3):
-                phase=(p.tool_time*3+i*.33)%1
-                px=tx+math.cos(i*2.2+p.tool_time)*phase*14*z
-                py=ty-phase*16*z+phase*phase*11*z
-                self.line([(px,py),(px+3*z,py-2*z)],'#ffe5a0',1.5)
-        else:
-            for side in (-1,1):
-                swing=-walk*side*8
-                line([(side*12,-5),(side*15,3+swing),(side*13,9+swing)],'#c6a360',5)
-                oval(side*13-3,7+swing,6,6,'#a8c2c5')
-        rr(-5,-17,10,8,'#6a8891',radius=2)
-        rr(-11,-27,22,17,'#f0cc76','#fff0b2',6)
-        rr(-8,-23,16,9,'#2e566b',radius=3)
-        line([(-5,-20),(5,-20)],'#a4e9e8',1.6)
-        rr(-8,-28,16,4,'#ffe5a0',radius=2)
-        for side in (-1,1):
-            rr(side*11-2,-22,4,7,'#83a3a9',radius=2)
-        # A small directional light keeps facing clear for local blueprint placement.
-        fx,fy = x+math.cos(p.angle)*21*z,y+math.sin(p.angle)*21*z
-        self.oval(fx-2*z,fy-2*z,4*z,4*z,'#f8efb5')
-        if p.stagger:
-            self.text(x,y-42*z,'!',15,'#ffe2a1',True,anchor='center')
-        self.text(x,y+31*z,'YOU',7,'#264e51',True,anchor='center')
-
-    def draw_core(self):
-        x,y = self.point(self.world.corepos)
-        z = self.camera.zoom
-        for i in range(3):
-            rr=(23+i*6)*z
-            self.oval(x-rr,y-rr*.35+13*z,rr*2,rr*.7,'','#a5c6b1',1)
-        self.roundrect(x-25*z,y-17*z,50*z,42*z,'#416b7c','#bfd4d1',8*z,1.5)
-        self.roundrect(x-20*z,y-22*z,40*z,14*z,'#91b4b7','#dce8d4',5*z)
-        for side in (-1,1):
-            self.roundrect(x+side*22*z-4*z,y-13*z,8*z,38*z,'#789ba4','#cfdfd7',3*z)
-        self.oval(x-15*z,y-21*z,30*z,34*z,'#4e9fad','#cdf8e8',2)
-        pulse=(8+math.sin(self.real_time*3)*1.5)*z
-        self.oval(x-pulse,y-7*z-pulse,2*pulse,2*pulse,'#c6f2d4')
-        self.oval(x-pulse*.4,y-7*z-pulse*.4,pulse*.8,pulse*.8,'#f1ffdb')
-        angle=self.real_time*1.8
-        self.line([(x+math.cos(angle)*12*z,y-7*z+math.sin(angle)*14*z),
-                   (x-math.cos(angle)*12*z,y-7*z-math.sin(angle)*14*z)],'#a9e3da',1)
-        self.text(x,y+38*z,'CORE',9,'#315655',True,anchor='center')
-        if self.world.corehp<self.world.coremax:
-            self.roundrect(x-30*z,y-38*z,60*z,4*z,'#5e685b',r=1)
-            self.roundrect(x-30*z,y-38*z,max(.2,60*z*self.world.corehp/self.world.coremax),4*z,'#b2e4b3',r=1)
-
-    def draw_foundation(self,b,order):
-        x,y = self.point(b.pos)
-        z = self.camera.zoom
-        progress = order.fraction
-        self.roundrect(x-18*z,y-13*z,36*z,29*z,'#7c948a','#c9d5b2',5*z)
-        height = (9+progress*27)*z
-        for side in (-1,1):
-            xx=x+side*14*z
-            self.line([(xx,y+11*z),(xx,y-height)],'#6a8590',3*z)
-            self.line([(xx-2*z,y-height),(xx+3*z,y-height)],'#e4cc98',2*z)
-        self.line([(x-14*z,y-height),(x+14*z,y-height)],'#adc1bd',3*z)
-        self.line([(x-14*z,y+9*z),(x+14*z,y-height)],'#dac18a',1.2)
-        for i in range(3):
-            yy=y+(8-i*(5+progress*5))*z
-            self.roundrect(x-9*z,yy,18*z,4*z,tint('#8aa6ac',SPECS[b.kind]['color'],progress),r=1)
-        if progress>.6:
-            self.roundrect(x-6*z,y-height-5*z,12*z,10*z,'#bed2cf',r=3)
-            self.line([(x-4*z,y-height-1*z),(x+4*z,y-height-1*z)],'#76cbd4',2*z)
-        self.roundrect(x-20*z,y+22*z,40*z,4*z,'#5c766e',r=1)
-        self.roundrect(x-20*z,y+22*z,max(.2,40*z*progress),4*z,'#f0d093',r=1)
-        self.text(x,y+33*z,f'{round(progress*100)}%',8,'#264d50',True,anchor='center')
-
-    def draw_deposit(self,key,data):
-        resource,amount = data
-        x,y = self.point((key[0]+.5,key[1]+.5))
-        z = self.camera.zoom
-        c = RESOURCE_COLORS[resource] if amount else '#8d9e89'
-        self.oval(x-22*z,y+3*z,45*z,19*z,'#7f9b76')
-        for dx,dy,size in ((-11,4,12),(2,-3,17),(12,8,10)):
-            points=[(x+(dx-size*.6)*z,y+dy*z),(x+(dx-size*.3)*z,y+(dy-size)*z),
-                    (x+(dx+size*.35)*z,y+(dy-size*1.2)*z),(x+(dx+size*.7)*z,y+(dy-1)*z),
-                    (x+dx*z,y+(dy+6)*z)]
-            self.polygon(points,c,'#6d857b',.65,True)
-            self.polygon([points[1],points[2],points[4]],tint(c,'#fff4cf',.45),'',.5,True)
-            self.line([points[2],points[4]],tint(c,'#f8ffe5',.7),1)
-        if amount:
-            self.text(x,y+29*z,RESOURCE_NAMES[resource].upper(),7,'#365955',True,anchor='center')
-        context = self.world.local_context()
-        if context==('deposit',key):
-            self.oval(x-25*z,y-20*z,50*z,43*z,'','#fff1bc',1)
-
-    def draw_approaches(self):
-        z=self.camera.zoom
-        for route_id,route in enumerate(self.world.approach_routes):
-            points=[(x+.5,y+.5) for x,y in route]
-            if len(points)>1:
-                outside,inside=points[-2],points[-1]
-                low,high=0.,1.
-                for _ in range(16):
-                    t=(low+high)/2
-                    p=(outside[0]+(inside[0]-outside[0])*t,outside[1]+(inside[1]-outside[1])*t)
-                    if self.world.in_core_area(p):high=t
-                    else:low=t
-                points[-1]=(outside[0]+(inside[0]-outside[0])*high,outside[1]+(inside[1]-outside[1])*high)
-            screen=[self.point(p) for p in points]
-            self.line(screen,tint(self.world.level.ground_dark,'#697a59',.2),41*z,joinstyle='round',capstyle='round')
-            self.line(screen,'#c7b68a',34*z,joinstyle='round',capstyle='round')
-            self.line(screen,'#d6c69e',25*z,joinstyle='round',capstyle='round')
-            for i in range(1,len(route)-1,3):
-                cell=route[i]
-                next_cell=route[i+1]
-                if self.world.in_core_area((cell[0]+.5,cell[1]+.5)):
-                    continue
-                x,y=self.point((cell[0]+.5,cell[1]+.5))
-                a=math.atan2(next_cell[1]-cell[1],next_cell[0]-cell[0])
-                pulse=.35+.12*math.sin(self.real_time*2-route_id)
-                color=tint('#9a936e','#f7edc4',pulse)
-                dx,dy=math.cos(a)*5*z,math.sin(a)*5*z
-                sx,sy=-math.sin(a)*4*z,math.cos(a)*4*z
-                self.line([(x-dx+sx,y-dy+sy),(x+dx*.5,y+dy*.5),(x-dx-sx,y-dy-sy)],color,1.5)
-            x,y=self.point((route[0][0]+.5,route[0][1]+.5))
-            initial=1 if self.world.level_id<3 else 2 if self.world.level_id<6 else 3
-            unlock=1 if route_id<initial else 1+(route_id-initial+1)*5
-            label=f'Trail {route_id+1}' if self.world.wave>=unlock else f'Trail {route_id+1} / Wave {unlock}'
-            self.text(x,y-28*z,label,7,'#69734f',True,anchor='center')
-
-    def draw_core_ring(self):
-        x,y=self.point(self.world.corepos)
-        r=self.world.core_build_radius*TILE*self.camera.zoom
-        self.oval(x-r,y-r,2*r,2*r,'','#6c8f6a',4)
-        self.oval(x-r,y-r,2*r,2*r,'','#e7edb7',1.5)
-        # Fence-like ticks make the area readable as a defended camp perimeter.
-        for i in range(28):
-            a=i*math.tau/28
-            c=(self.world.corepos[0]+math.cos(a)*7,self.world.corepos[1]+math.sin(a)*7)
-            if any(distance(c,(p[0]+.5,p[1]+.5))<.9 for p in self.world.path_tiles):
-                continue
-            px,py=self.point(c)
-            self.line([(px-math.cos(a)*3,py-math.sin(a)*3),(px+math.cos(a)*3,py+math.sin(a)*3)],'#f0efc5',1.3)
-        lx,ly=self.point((self.world.corepos[0],self.world.corepos[1]+6.25))
-        self.roundrect(lx-91,ly-11,182,25,'#557a5f','#d2dfa8',r=9)
-        self.text(lx,ly+2,'CORE BUILD AREA',8,'#edf0cf',True,anchor='center')
-        if self.blueprint is not None and SPECS[self.blueprint]['role'] in ('wall','gate'):
-            rr=2.5*TILE*self.camera.zoom
-            self.oval(x-rr,y-rr,2*rr,2*rr,'','#edbd93',1.5)
-        if self.blueprint is not None:
-            for gx,gy in self.world.connected_relays():
-                cx,cy=self.point((gx+.5,gy+.5))
-                rr=5*TILE*self.camera.zoom
-                self.oval(cx-rr,cy-rr,2*rr,2*rr,'','#aecba1',.8)
-
-    def terrain(self):
-        w = self.world
-        level = w.level
-        self.canvas.set_layer('terrain')
-        self.rect(LEFT,TOP,VIEW_W,VIEW_H,'#59786e')
-        x,y = self.point((0,0))
-        unit = TILE*self.camera.zoom
-        self.rect(x,y,NX*unit,NY*unit,level.ground)
-        # Overlapping soft organic patches, no checkerboard or baked scenery.
-        for gx,gy,seed,phase in self.decor[::4]:
-            if not self.visible((gx,gy),1):
-                continue
-            px,py = self.point((gx,gy))
-            radius=(17+seed*34)*self.camera.zoom
-            self.oval(px-radius,py-radius*.5,radius*2,radius,tint(level.ground,level.ground_dark,.18+seed*.2))
-        self.draw_approaches()
-        self.draw_core_ring()
-        for gx,gy,seed,phase in self.decor:
-            if not self.visible((gx,gy),.5) or (int(gx),int(gy)) in w.terrain:
-                continue
-            px,py = self.point((gx,gy))
-            z = self.camera.zoom
-            if seed<.64:
-                sway=math.sin(self.real_time*1.6+phase)*2*z
-                c=tint(level.ground_dark,'#577b61',.35)
-                self.line([(px-2*z,py+4*z),(px-4*z+sway,py-3*z)],c,.8)
-                self.line([(px+1*z,py+4*z),(px+4*z+sway,py-1*z)],c,.8)
-                if seed<.09 and level.weather not in ('dust','rain'):
-                    self.oval(px-5*z+sway,py-6*z,4*z,4*z,'#f2e6b7')
-            else:
-                self.oval(px,py,3*z,2*z,tint(level.ground_dark,'#dcc6a4',.5))
-        for gx,gy in sorted(w.terrain):
-            if not self.visible((gx,gy),1):
-                continue
-            px,py = self.point((gx+.5,gy+.5))
-            z = self.camera.zoom
-            if level.terrain_style in ('river','wetland','storm'):
-                self.rect(px-unit/2,py-unit/2,unit+1,unit+1,'#71a9b4')
-                for dx,dy in ((-1,0),(1,0),(0,-1),(0,1)):
-                    if (gx+dx,gy+dy) not in w.terrain:
-                        if dx:
-                            self.rect(px+(-unit/2 if dx<0 else unit/2-3*z),py-unit/2,3*z,unit,'#c0c6a3')
-                        else:
-                            self.rect(px-unit/2,py+(-unit/2 if dy<0 else unit/2-3*z),unit,3*z,'#c0c6a3')
-                drift=math.sin(self.real_time*1.7+gx+gy)*3*z
-                self.line([(px-12*z+drift,py),(px+3*z+drift,py),(px+10*z+drift,py-2*z)],'#acd5d4',.9)
-            elif level.terrain_style=='grove':
-                self.oval(px-25*z,py+3*z,56*z,25*z,'#739772')
-                self.roundrect(px-5*z,py-19*z,10*z,39*z,'#8e805d',r=3*z)
-                sway=math.sin(self.real_time+gx)*1.4*z
-                for dx,dy,r,c in ((0,-21,25,'#587e64'),(-11,-30,20,'#6d946e'),(10,-31,21,'#7da374'),(0,-43,18,'#91b77d')):
-                    self.oval(px+(dx-r)*z+sway,py+(dy-r)*z,r*2*z,r*2*z,c)
-            else:
-                rock='#82957e' if level.difficulty=='Easy' else '#a08d73' if level.weather=='dust' else '#839894'
-                self.oval(px-23*z,py+4*z,51*z,24*z,tint(level.ground_dark,'#546f61',.25))
-                points=[(px-23*z,py+11*z),(px-16*z,py-12*z),(px-4*z,py-23*z),
-                        (px+17*z,py-14*z),(px+24*z,py+10*z),(px+9*z,py+19*z),(px-12*z,py+18*z)]
-                self.polygon(points,rock,'',1,True)
-                self.polygon([points[1],points[2],points[3],(px+1*z,py-1*z)],tint(rock,'#f2e3bc',.35),'',1,True)
-                self.polygon([points[3],points[4],points[5],(px+1*z,py-1*z)],tint(rock,'#445d55',.28),'',1,True)
-                self.line([(px-12*z,py+8*z),(px-1*z,py+4*z),(px+7*z,py+9*z)],tint(rock,'#364f46',.25),1)
-        for key,data in w.deposits.items():
-            if self.visible((key[0]+.5,key[1]+.5)):
-                self.draw_deposit(key,data)
-        for gx,gy in w.spawns:
-            if self.visible((gx+.5,gy+.5)):
-                px,py=self.point((gx+.5,gy+.5))
-                self.oval(px-19*self.camera.zoom,py-11*self.camera.zoom,38*self.camera.zoom,23*self.camera.zoom,'#766d51','#baa879',1)
-                self.oval(px-12*self.camera.zoom,py-7*self.camera.zoom,24*self.camera.zoom,14*self.camera.zoom,'#4a5d47')
-
-    def actors(self):
-        self.canvas.set_layer('actors')
-        objects=[(self.world.corepos[1],0,None),(self.world.player.y,1,None)]
-        for b in self.world.buildings.values():
-            if self.visible(b.pos):
-                objects.append((b.y+.5,2,b))
-        for e in self.world.enemies:
-            if self.visible(e.pos,2):
-                objects.append((e.y+(50 if e.flying else 0),3,e))
-        for _,kind,obj in sorted(objects,key=lambda item:item[0]):
-            if kind==0:
-                self.draw_core()
-            elif kind==1:
-                self.draw_player()
-            elif kind==2:
-                key=(obj.x,obj.y)
-                if isinstance(obj,Foundation):
-                    order=self.world.orders.get(key)
-                    if order:
-                        self.draw_foundation(obj,order)
-                else:
-                    self.draw_robot(obj,*self.point(obj.pos),self.camera.zoom)
-                    if key in self.world.orders:
-                        order=self.world.orders[key]
-                        x,y=self.point(obj.pos)
-                        self.roundrect(x-22,y+29,44,4,'#536e6b',r=1)
-                        self.roundrect(x-22,y+29,max(.2,44*order.fraction),4,'#eacb88',r=1)
-                    if obj.hp<obj.stats()['hp']:
-                        x,y=self.point(obj.pos)
-                        self.roundrect(x-18,y-36*self.camera.zoom,36,3,'#6e7461',r=1)
-                        self.roundrect(x-18,y-36*self.camera.zoom,max(.2,36*obj.hp/obj.stats()['hp']),3,'#b3e5b5',r=1)
-            else:
-                self.draw_bug(obj,*self.point(obj.pos),self.camera.zoom*1.1)
-
-    def effects(self):
-        self.canvas.set_layer('effects')
-        for projectile in self.world.projectiles:
-            if projectile['age']<0:
-                continue
-            pos=(projectile['x'],projectile['y'])
-            if not self.visible(pos):
-                continue
-            x,y=self.point(pos)
-            dx,dy=projectile['dest'][0]-pos[0],projectile['dest'][1]-pos[1]
-            a=math.atan2(dy,dx)
-            if projectile['role']=='mortar':
-                total=max(.1,distance(projectile['origin'],projectile['dest']))
-                progress=min(1,distance(projectile['origin'],pos)/total)
-                self.oval(x-4,y-2,8,4,'#779075')
-                y-=math.sin(progress*math.pi)*65*self.camera.zoom
-            self.line([(x-math.cos(a)*12*self.camera.zoom,y-math.sin(a)*12*self.camera.zoom),(x,y)],'#ffe4a4',2)
-            self.oval(x-2,y-2,4,4,'#fff5cd')
-        for effect in self.world.effects[-180 if self.quality else -60:]:
-            if self.visible(effect['pos'],3):
-                adjusted=dict(effect)
-                adjusted['size']*=self.camera.zoom
-                self.draw_effect(adjusted)
-        for hazard in self.world.hazards:
-            if self.visible(hazard['pos']):
-                x,y=self.point(hazard['pos'])
-                r=hazard['radius']*TILE*self.camera.zoom
-                self.oval(x-r,y-r*.6,r*2,r*1.2,'','#cadc8a' if hazard.get('enemy') else '#ecc28b',1.5)
-        if self.quality:
-            for i in range(18):
-                xx=LEFT+(i*67+self.real_time*(13 if self.world.level.weather=='rain' else 3))%VIEW_W
-                yy=TOP+(i*83+self.real_time*(190 if self.world.level.weather=='rain' else -5))%VIEW_H
-                if self.world.level.weather=='rain':
-                    self.line([(xx,yy),(xx-4,yy+13)],'#b7d2cd',.6)
-                else:
-                    self.oval(xx,yy,1.8,1.8,'#e4e9bd')
-        if self.blueprint is not None:
-            self.blueprint_preview()
-
-    def blueprint_preview(self):
-        gx,gy=self.world.blueprint_tile()
-        if not(0<=gx<NX and 0<=gy<NY):
-            return
-        x,y=self.point((gx+.5,gy+.5))
-        z=self.camera.zoom
-        error=self.world.site_error(gx,gy,self.blueprint)
-        color='#efad98' if error else '#f0f9bc'
-        self.roundrect(x-20*z,y-18*z,40*z,36*z,'',color,r=5*z,width=1.6)
-        phase=(self.real_time*1.5)%1
-        for side in (-1,1):
-            self.line([(x+side*17*z,y+10*z),(x+side*17*z,y-16*z-phase*6*z)],color,1)
-        self.text(x,y-37*z,'F  BUILD HERE' if not error else 'KEEP TRAIL CLEAR' if 'Enemy trail' in error else 'CANNOT BUILD',8,color,True,anchor='center')
-
-    def masks(self):
-        self.canvas.set_layer('masks')
-        self.rect(0,0,WIDTH,TOP-5,'#122d3d')
-        self.rect(0,TOP-5,LEFT-5,HEIGHT,'#122d3d')
-        self.rect(LEFT+VIEW_W+5,TOP-5,WIDTH,HEIGHT,'#122d3d')
-        self.rect(0,TOP+VIEW_H+5,WIDTH,HEIGHT,'#122d3d')
-
-    def header(self):
-        w=self.world
-        self.canvas.set_layer('hud')
-        self.gradient(0,0,WIDTH,88,'#2d6e98','#17496b',14)
-        self.text(22,12,'PROJECT-SWARMFALL',17,'#f1edce',True)
-        self.text(24,46,f'LEVEL {w.level_id+1}  •  {w.level.name}',11,'#bdd3c6',True)
-        items=[('$',f'{w.money:,}','#f3d590'),('M',str(w.materials['metal']),'#c7dadc'),
-               ('C',str(w.materials['circuits']),'#e4bb85'),('◆',str(w.materials['crystal']),'#c6b3ed')]
-        labels=('Dollars','Metal','Parts','Crystals')
-        for i,(icon,value,color) in enumerate(items):
-            xx=324+i*126
-            self.roundrect(xx,13,117,59,'#24567b','#5f99b9',r=13)
-            self.oval(xx+9,26,27,27,tint('#36504d',color,.35),color,.8)
-            self.polygon([(xx+22,32),(xx+29,40),(xx+22,48),(xx+15,40)],color) if icon=='◆' else self.text(xx+22,40,icon,12,color,True,anchor='center')
-            self.text(xx+45,22,value,17,color,True)
-            self.text(xx+45,49,labels[i],8,'#adc5bf')
-        self.text(846,14,'Core health',10,'#c3d7c7',True)
-        self.roundrect(846,37,198,12,'#4b6255',r=5)
-        self.roundrect(846,37,max(.1,198*w.corehp/w.coremax),12,'#bcdca3',r=5)
-        self.text(846,56,f'{int(w.corehp):,} / {w.coremax:,}',8,'#a9c8bd')
-        self.roundrect(1066,13,187,59,'#284a48','#72977d',r=13)
-        self.text(1081,22,f'Wave {w.wave} / 40' if w.active else f'Next: wave {min(40,w.wave+1)}',17,'#ece3ba',True)
-        seconds=max(0,math.ceil(w.intermission))
-        status='Defend the core!' if w.active else 'Tutorial: timer paused' if w.tutorial and w.tutorial_step<7 else ('Supplies ready • ' if w.supply_pending is not None else 'Starts in ')+f'{seconds//60}:{seconds%60:02d}'
-        self.text(1081,51,status,8,'#b9d2bd')
-        self.button(1280,23,138,37,'Pause  [P]',('pause',),size=11)
+            self.canvas.delete("all")
+            self.buttons.clear()
+            if self.screen == "menu":
+                self.draw_title()
+            elif self.screen == "select":
+                self.draw_chapter_select()
+            elif self.screen == "profile":
+                self.draw_profile()
+            elif self.screen == "help":
+                self.draw_help()
 
 
-    def sidebar(self):
-        x=PANEL_X
-        self.roundrect(x-2,TOP-1,288,VIEW_H+2,'#245d83','#75acc8',r=13)
-        self.text(x+13,111,'Build your defense',16,'#ece5c5',True)
-        self.text(x+13,140,'Pick a blueprint. Build it in the field.',8,'#b0c9c2')
-        self.button(x+10,162,127,30,'Robots',('category','robots'),accent='#c5dda5' if self.category=='robots' else None,size=10)
-        self.button(x+146,162,127,30,'Buildings',('category','structures'),accent='#c5dda5' if self.category=='structures' else None,size=10)
-        page=getattr(self,'blueprint_page',0)
-        indices=range(page*4,page*4+4) if self.category=='robots' else range(12,len(SPECS))
-        for row,index in enumerate(indices):
-            spec=SPECS[index]
-            by=204+row*(66 if self.category=='robots' else 54)
-            height=59 if self.category=='robots' else 48
-            active=self.blueprint==index
-            self.button(x+10,by,263,height,'',('blueprint',index),accent=spec['color'] if active else None)
-            b=Building(0,0,index)
-            b.angle=-.4
-            self.draw_robot(b,x+34,by+height*.57,.65 if index<12 else .54)
-            self.text(x+60,by+9,spec['name'],11,'#e9eedc',True,width=197)
-            enough=self.world.money>=spec['price'] and all(self.world.materials[r]>=spec.get(r,0) for r in self.world.materials)
-            self.text(x+60,by+32,f'${spec["price"]}  ·  '+('Ready to build' if enough else 'Need supplies'),8,'#bfd5b0' if enough else '#d9bb91')
-        if self.category=='robots':
-            for i in range(3):
-                self.button(x+10+i*89,473,82,25,f'{i*4+1}–{i*4+4}',('shop_page',i),accent='#d7cd99' if i==page else None,size=8)
-        y=517
-        if self.blueprint is not None:
-            spec=SPECS[self.blueprint]
-            subtitle,description=DESCRIPTIONS[spec['role']]
-            self.text(x+13,y,spec['name'],16,spec['color'],True,width=253)
-            self.text(x+13,y+34,subtitle,10,'#ddd5ad',True,width=251)
-            self.text(x+13,y+60,description,10,'#bed1ca',width=250)
-            self.line([(x+13,y+138),(x+268,y+138)],'#52716e',1)
-            self.text(x+13,y+153,f'${spec["price"]}   •   {spec["metal"]} Metal',12,'#eed297',True)
-            self.text(x+13,y+182,f'{spec["circuits"]} Parts   •   {spec.get("crystal",0)} Crystals',10,'#c0cfc6')
-            duration=2.5 if spec['role']=='wall' else 3 if spec['role']=='gate' else 5 if self.blueprint<12 else 4
-            self.text(x+13,y+211,f'{duration:g}s to build  ·  Hold E at the site',9,'#b9d8b4')
-            self.roundrect(x+11,y+244,264,42,'#35584f','#b0c59d',r=9)
-            self.text(x+23,y+256,'F  Set site in front of you',10,'#e7e9c9',True)
-        else:
-            self.text(x+13,y+10,'Your camp. Your plan.',16,'#e7dfba',True)
-            self.text(x+13,y+57,'Choose a robot above to see what it does. Build beside the enemy trails, never on them.',12,'#bfd2cb',width=252)
-            self.text(x+13,y+158,'The bright ring marks the core building area. Bugs leave the trails when they enter it.',11,'#bdd2c2',width=249)
-            self.text(x+13,y+247,'Walk to robots and press E to upgrade.',10,'#e6d8a9',width=249)
-        supply,used=self.world.power()
-        self.text(x+13,827,f'Power {used}/{supply}  •  Walls {self.world.barrier_count()}/{self.world.barrier_limit}',8,'#e3bb8c' if used>supply else '#adc8bd')
+def main():
+    root = tk.Tk()
+    BlackwellGame(root)
+    root.mainloop()
 
 
-    def action_bar(self):
-        w=self.world
-        self.roundrect(18,859,1100,65,'#245d80','#81b4c6',r=13,width=1.5)
-        context=w.local_context()
-        primary='WASD  Move    SHIFT  Run    E  Interact'
-        secondary='Mine materials, build robots, and protect the core.'
-        progress=None;mining=False
-        if context:
-            kind,key=context
-            if kind=='deposit':
-                resource,remaining=w.deposits[key]
-                duration=w.mining_duration(resource,key)
-                primary=('Tool overheated! Release E to cool.' if w.overheated else f'Hold E to mine {RESOURCE_NAMES[resource]}')
-                secondary=f'{remaining} left  •  {duration:.1f}s per chunk  •  '+('Good hit! Finish this chunk.' if w.precision_used else 'Space in the green = bonus materials')
-                progress=w.mine_progress/duration;mining=True
-            elif kind=='order':
-                order=w.orders[key]
-                primary=f'Hold E to {"build" if order.task=="build" else "install" if order.task=="upgrade" else "repair"}: {order.name}'
-                secondary=f'{max(0,order.duration-order.progress):.1f}s left. Stay nearby to work.'
-                progress=order.fraction
-            elif kind=='robot':
-                b=w.buildings[key];primary=f'E  {b.spec["name"]}'
-                secondary='Upgrades, repairs and selling. The battle keeps going.'
-            elif kind=='core':
-                primary='E  Core'
-                secondary='Pick up supplies, upgrade your drill, or check the next wave.'
-                if w.supply_pending is not None:secondary='Supply pack ready! Press E and pick one.'
-        self.text(35,870,primary,12,'#fff1c9',True,width=771)
-        self.text(35,894,secondary,9,'#c1e0e7',width=775)
-        if progress is not None:
-            bx,by,bw=36,915,750
-            self.roundrect(bx,by,bw,4,'#17455f',r=1)
-            if mining:
-                self.rect(bx+bw*.52,by-1,bw*.26,6,'#668a92' if w.precision_used else '#9bdb83')
-                marker=bx+bw*min(1,max(0,progress))
-                self.rect(marker-2,by-3,4,10,'#fff6c5')
-            else:self.roundrect(bx,by,max(.1,bw*min(1,progress)),4,'#f2d372',r=1)
-        heat_color='#f5a36f' if w.tool_heat>.75 else '#f1d06f' if w.tool_heat>.4 else '#90d7da'
-        self.text(839,871,'TOOL HEAT' if not w.overheated else 'COOLING DOWN',8,heat_color,True)
-        self.text(1095,871,f'{round(w.tool_heat*100)}%',9,heat_color,True,anchor='ne')
-        self.roundrect(839,892,258,11,'#153f59',r=5)
-        self.roundrect(839,892,max(.1,258*w.tool_heat),11,heat_color,r=5)
-        self.text(839,910,f'Drill {w.drill_level}/3  •  Release E to cool',7,'#b5d4df')
-        self.button(1136,860,138,63,'Help  [H]',('help',),size=11)
-        self.button(1285,860,138,63,'Pause  [P]',('pause',),size=11)
+if __name__ == "__main__":
+    main()
 
 
-    def tutorial_card(self):
-        w=self.world
-        if not w.tutorial or w.tutorial_complete:
-            return
-        title,description=TUTORIAL_STEPS[w.tutorial_step]
-        self.roundrect(34,111,431,110,'#264a50','#d0dba8',r=12)
-        self.text(50,124,f'TUTORIAL  {w.tutorial_step+1} / {len(TUTORIAL_STEPS)}',8,'#bfdfb4',True)
-        self.text(50,145,title,15,'#f1e9c6',True)
-        self.text(50,176,description,10,'#d1e0d5',width=396)
-        if w.tutorial_step==1:
-            target=(12.5,14.5)
-        elif w.tutorial_step in (5,6):
-            robots=[b for b in w.buildings.values() if b.kind<12 and not isinstance(b,Foundation)]
-            target=robots[0].pos if robots else w.player.pos
-        elif w.tutorial_step==7:
-            target=w.corepos
-        else:
-            target=None
-        if target:
-            x,y=self.point(target)
-            bob=math.sin(self.real_time*3)*4
-            self.text(x,y-52+bob,'▼',19,'#fff0b8',True,anchor='center')
-
-    def notices(self):
-        notices=self.world.feedback[-2:]
-        for i,notice in enumerate(reversed(notices)):
-            progress=min(ease(notice['age']/.25),ease(notice['life']/.3))
-            x=LEFT+VIEW_W-335+(1-progress)*70
-            y=TOP+16+i*72
-            self.roundrect(x,y,317,62,'#26484f',notice['color'],r=10)
-            self.text(x+13,y+10,notice['title'],10,notice['color'],True,width=290)
-            self.text(x+13,y+32,notice['body'],8,'#bfd7ce',width=290)
-        if self.world.message_time and self.world.message:
-            self.text(37,TOP+VIEW_H-20,self.world.message,9,'#2f5652',True,width=1040)
-
-    def radar(self):
-        x,y=LEFT+16,TOP+VIEW_H-123
-        self.roundrect(x,y,147,99,'#33554f','#a2bc9f',r=7)
-        for gx,gy in self.world.terrain:
-            self.rect(x+9+gx*4.6,y+9+gy*3.5,4.6,3.5,'#738f79')
-        for e in self.world.enemies:
-            self.oval(x+9+e.x*4.6,y+9+e.y*3.5,2.5,2.5,'#f2bb96')
-        self.oval(x+9+self.world.corepos[0]*4.6-2,y+9+self.world.corepos[1]*3.5-2,4,4,'#e9eab3')
-        p=self.world.player
-        self.oval(x+9+p.x*4.6-2,y+9+p.y*3.5-2,4,4,'#fcdf89')
-        self.text(x+11,y+86,'YOU  ●   CORE  ●',6,'#d9e3c6')
-
-    def scrim(self):
-        self.canvas.create_rectangle(0,0,WIDTH,HEIGHT,fill='#0b2532',outline='',stipple='gray50')
-        self.buttons=[]
-
-    def robot_panel(self,key):
-        b=self.world.buildings.get(key)
-        if not b or distance(self.world.player.pos,b.pos)>1.75:
-            self.panel=None
-            return
-        self.scrim()
-        x,y=300,88
-        self.roundrect(x+7,y+9,840,762,'#122d34',r=22)
-        self.roundrect(x,y,840,762,'#245d83','#74adc6',r=22)
-        self.text(x+28,y+23,b.spec['name']+' upgrades',25,b.spec['color'],True)
-        self.text(x+28,y+65,'Choose an upgrade, then hold E beside your robot to install it.',11,'#c6d8c9')
-        self.button(x+704,y+24,110,33,'Back [Esc]',('close',),size=9)
-        if b.kind<12:
-            if max(b.paths)>=2:
-                main=0 if b.paths[0]>=2 else 1
-                guide=f'Main path: {b.spec["paths"][main][0]}. The other side can only take its first upgrade.'
-            else:
-                guide='Pick one main path. You may still buy the first upgrade on BOTH sides.'
-            self.roundrect(x+28,y+104,784,45,'#3a7392','#91b6ba',r=10)
-            self.text(x+43,y+119,guide,10,'#eadfb7',width=753)
-            for path,(name,upgrades) in enumerate(b.spec['paths']):
-                xx=x+28+path*400
-                color='#edd08e' if path==0 else '#b8d7de'
-                self.text(xx,y+170,name,15,color,True)
-                for tier in range(3):
-                    self.oval(xx+278+tier*27,y+173,13,13,color if b.paths[path]>tier else '#496b65',color,.7)
-                for tier,u in enumerate(upgrades):
-                    yy=y+206+tier*128
-                    bought=b.paths[path]>tier
-                    next_tier=b.paths[path]==tier
-                    locked=b.paths[1-path]>=2 and tier>=1
-                    self.roundrect(xx,yy,384,120,'#2d7099','#b8da8b' if bought else '#5795b5',r=10)
-                    self.text(xx+12,yy+10,f'{tier+1}. {u["name"]}',11,'#cee0b9' if bought else '#eef0d8',True,width=357)
-                    description=plain_upgrade(u)
-                    self.text(xx+12,yy+35,description,9,'#bfd4ca',width=357)
-                    if next_tier and not locked and len(description)<112:
-                        self.text(xx+12,yy+67,upgrade_comparison(b,path),8,'#e0d6ae',width=355)
-                    if bought:label='Installed'
-                    elif locked:label='Other path is limited to upgrade 1'
-                    elif not next_tier:label=f'Get upgrade {tier} first'
-                    elif self.world.money<u['price']:label=f'Need ${u["price"]-self.world.money} more'
-                    else:label=f'Prepare upgrade  ·  ${u["price"]}'
-                    self.button(xx+10,yy+91,363,24,label,('upgrade',key,path),enabled=next_tier and not locked and self.world.money>=u['price'] and key not in self.world.orders,accent=color if next_tier and not locked else None,size=9)
-        else:
-            subtitle,description=DESCRIPTIONS[b.role]
-            self.text(x+28,y+131,subtitle,19,'#e5d7ab',True)
-            self.text(x+28,y+180,description,15,'#c2d6ca',width=772)
-            if b.role=='gate':
-                self.button(x+28,y+286,784,48,'Close gate' if b.opened else 'Open gate',('gate',key),accent='#d7c28f')
-            self.text(x+28,y+403,'Your engineer does the work here in the camp.\nRobots do the fighting.',16,'#bfd4c8')
-        missing=b.stats()['hp']-b.hp
-        cost,metal=math.ceil(missing*.08),math.ceil(missing*.02)
-        self.text(x+28,y+615,f'Health {int(b.hp)} / {int(b.stats()["hp"])}  ·  Uses {b.spec["power"]} power',11,'#c4d5c5')
-        self.button(x+28,y+652,383,44,f'Repair  ·  ${cost} + {metal} Metal',('repair',key),enabled=missing>=1 and key not in self.world.orders,size=11)
-        self.button(x+429,y+652,383,44,f'Sell  ·  +${int(b.invested*.7)}',('sell',key),enabled=key not in self.world.orders,size=11)
-        self.text(x+28,y+723,'The battle continues. Choose, then hold E beside the robot to install.',10,'#9cbdb5')
-
-
-    def core_panel(self):
-        w=self.world
-        if distance(w.player.pos,w.corepos)>1.95:
-            self.panel=None;return
-        self.scrim()
-        x,y=360,91
-        self.roundrect(x+7,y+9,720,758,'#12334e',r=24)
-        self.roundrect(x,y,720,758,'#24658d','#79bed8',r=24,width=2)
-        self.text(x+29,y+23,'Core & Supplies',28,'#fff0c0',True)
-        self.text(x+30,y+76,f'Health {int(w.corehp):,} / {w.coremax:,}',12,'#d2e8dc',True)
-        self.button(x+568,y+29,124,34,'Back [Esc]',('close',),size=10)
-        self.roundrect(x+28,y+112,664,121,'#174d74','#6fa9bd',r=15)
-        if w.active:
-            self.text(x+46,y+128,f'Wave {w.wave} / 40',24,'#fff2c6',True)
-            self.text(x+46,y+175,f'{len(w.enemies)} bugs fighting  •  {len(w.queue)} still coming',12,'#c0dce6')
-        else:
-            seconds=max(0,math.ceil(w.intermission))
-            clock=f'{seconds//60}:{seconds%60:02d}'
-            self.text(x+46,y+127,f'Wave {w.wave+1} in {clock}',25,'#fff1b8',True)
-            self.text(x+46,y+174,'Timer starts after the first tutorial steps.' if w.tutorial and w.tutorial_step<7 else 'Waves start automatically. Use this time to mine and build.',11,'#c5e1e9')
-        self.text(x+30,y+258,'Choose supplies' if w.supply_pending is not None else 'Next supply drop',18,'#ffe4a1',True)
-        if w.supply_pending is not None:
-            choices=(('materials','Materials','48 Metal + 16 Parts + 3 Crystals'),
-                     ('repair','Repairs','900 core health + 35% building repairs'),
-                     ('money','Dollars',f'${250+w.wave*10} for robots and upgrades'))
-            for i,(choice,title,description) in enumerate(choices):
-                yy=y+300+i*73
-                self.button(x+28,yy,664,62,'',('supply',choice),accent='#d8df8a')
-                self.text(x+45,yy+10,title,14,'#fff3c4',True)
-                self.text(x+45,yy+36,description,10,'#d5e6cc')
-            self.text(x+31,y+528,'Pick one before the next wave starts.',9,'#c6dce3')
-        else:
-            next_drop=(w.wave//5+1)*5
-            self.text(x+30,y+300,f'Supplies arrive after wave {min(40,next_drop)}.',14,'#d0e3e4')
-            self.text(x+30,y+339,'Every fifth wave gives you a one-minute break and a choice of supplies.',12,'#bddce6',width=655)
-            self.text(x+30,y+399,'Keep the core untouched for a bonus.\nMore trails open as the waves get harder.',12,'#e1dfba')
-        rank=w.drill_level+1
-        if w.drill_level<3:
-            money,metal,parts=220*rank,20*rank,8*rank
-            enabled=w.money>=money and w.materials['metal']>=metal and w.materials['circuits']>=parts
-            self.button(x+28,y+567,664,54,f'Upgrade drill to {rank}  •  ${money} + {metal} Metal + {parts} Parts',('drill',),enabled=enabled,accent='#9ad7dc',size=11)
-            self.text(x+31,y+637,'Each drill upgrade improves mining speed and cooling.',10,'#c3dde5')
-        else:self.text(x+31,y+592,'Drill fully upgraded!',17,'#c7e8a8',True)
-        self.button(x+28,y+679,664,49,'Back to the field',('close',),size=14)
-
-
-    def help_panel(self):
-        self.scrim()
-        self.roundrect(320,111,800,718,'#1c3c49','#8eb5b7',r=20)
-        self.text(354,142,'FIELD ENGINEER GUIDE',27,'#efdfb7',True)
-        sections=(
-            ('MOVE / WASD','Walk your engineer around the world. Hold Shift to run. Scroll to zoom. There are no remote building controls.'),
-            ('MINE / HOLD E','Hold E beside a deposit. Release E to cool your tool. Press Space while the marker is green for extra materials.'),
-            ('BUILD / F, THEN HOLD E','Choose a sidebar blueprint. Face a nearby green tile and press F. Hold E beside the site to construct it. Work pauses when you leave.'),
-            ('UPGRADE / WALK UP AND PRESS E','Stand beside a robot and press E. Choose a path upgrade, close the panel, and hold E beside the robot to install it.'),
-            ('DEFEND THE CORE','Robots fight automatically. Bugs still damage structures and the core. Touching a bug knocks your engineer back; you have no attack.'),
-            ('WAVES / USE THE CORE','Waves start automatically: 60 seconds before wave 1, then 15-second breaks. Every fifth wave gives a minute and supplies.'),
-        )
-        for i,(title,description) in enumerate(sections):
-            yy=207+i*82
-            self.text(354,yy,title,11,'#c2dfb5',True)
-            self.text(354,yy+24,description,11,'#bed4d2',width=725)
-        self.button(354,747,732,45,'BACK',('close',),size=12)
-
-    def pause_panel(self):
-        self.scrim()
-        self.roundrect(470,205,500,520,'#1b3d49','#91b7b6',r=22)
-        self.text(505,244,'PAUSED',34,'#ead7a7',True)
-        self.text(506,300,f'{self.world.level.name} / Wave {self.world.wave}',13,'#b6d0cd')
-        self.button(505,354,430,49,'Resume game',('resume',),accent='#b7dda9',size=13)
-        self.button(505,420,430,42,'ANIMATION DETAIL: '+('FULL' if self.quality else 'REDUCED'),('quality',),size=10)
-        self.button(505,478,430,42,'Restart level',('start',self.world.level_id,False),size=11)
-        self.button(505,536,430,42,'Choose a level',('levels',),size=11)
-        self.button(505,594,430,42,'Main menu',('title',),size=11)
-        self.text(506,676,'WASD movement  •  E work / interact  •  F construction',9,'#98bdc1')
-
-    def outcome_panel(self):
-        self.scrim()
-        won=self.world.outcome=='won'
-        if won:
-            self.completed.add(self.world.level_id)
-        self.roundrect(400,194,640,545,'#1b3d49','#b3c99f' if won else '#c99d88',r=20)
-        self.text(437,231,'CORE PROTECTED' if won else 'CORE LOST',31,'#d9e8bd' if won else '#e9b39a',True)
-        self.text(438,293,self.world.level.name,18,'#d9ddd0',True)
-        self.text(438,338,f'Wave {self.world.wave} / 40  •  {self.world.kills} bugs defeated',13,'#b9d2cf')
-        self.text(438,380,'Your engineer built the defense. Your robots held the line.' if won else 'Try different robot positions, stronger upgrades, and connected power.',12,'#b5cfcd',width=565)
-        if won and self.world.level_id<8:
-            self.button(438,460,564,47,'NEXT LEVEL',('start',self.world.level_id+1,False),accent='#bfdca7',size=13)
-        else:
-            self.button(438,460,564,47,'TRY THIS LEVEL AGAIN',('start',self.world.level_id,False),size=12)
-        self.button(438,526,564,43,'CHOOSE A LEVEL',('levels',),size=12)
-        self.button(438,586,564,43,'Main menu',('title',),size=12)
-
-    def title_screen(self):
-        self.gradient(0,0,WIDTH,HEIGHT,'#244b53','#102c3c',32)
-        # All characters in this diorama are the same live articulated rigs as play.
-        for i in range(14):
-            x=700+(i*139)%740
-            y=170+(i*91)%720
-            r=35+i%3*16
-            self.oval(x-r,y-r*.4,r*2,r*.8,'#355e5c')
-        for i,kind in enumerate((0,3,7,9)):
-            b=Building(0,0,kind)
-            b.angle=math.sin(self.real_time*.6+i)*.4
-            b.animation=.1 if math.sin(self.real_time*5+i)>.8 else 0
-            self.draw_robot(b,870+(i%2)*330,380+(i//2)*310,2.5)
-        for i,name in enumerate(('Ant','Beetle','Wasp','Mantis')):
-            e=Enemy(name,1+i,2+i,1)
-            e.angle=math.pi+.2*math.sin(self.real_time*.5+i)
-            self.draw_bug(e,1020+(i%2)*290+math.sin(self.real_time*.7+i)*20,200+(i//2)*340,2.6)
-        for i in range(27):
-            px=670+(i*73+self.real_time*5)%770
-            py=(i*111-self.real_time*8)%HEIGHT
-            self.oval(px,py,2,2,'#b6d2b2')
-        self.rect(0,0,630,HEIGHT,'#143342')
-        for i in range(10):
-            self.rect(630+i*5,0,6,HEIGHT,tint('#143342','#244b53',i/20))
-        self.text(62,106,'PROJECT-',34,'#a9cbc9',True)
-        self.text(57,157,'SWARMFALL',58,'#eff0d1',True)
-        self.line([(64,255),(395,255)],'#e1c58e',3)
-        self.text(64,292,'BUILD A BASE. STOP THE SWARM.',18,'#e9cf98',True)
-        self.text(64,342,'Mine, build and upgrade.\nKeep the core safe.',19,'#b4d0cf')
-        self.button(64,470,467,76,'Play',('levels',),accent='#b9e67d',size=24)
-        self.text(67,577,'Choose a level to get started.',13,'#b9d8df')
-        self.text(66,649,'3 EASY  /  3 MEDIUM  /  3 HARD',12,'#c3d6c4',True)
-        self.text(66,697,'You gather and build.\nYour robots do the fighting.',13,'#a6c7c9')
-        self.text(66,842,'12 robots  •  72 upgrades  •  40 waves per level',11,'#88b4bb')
-
-    def level_screen(self):
-        self.gradient(0,0,WIDTH,HEIGHT,'#254d56','#112d3e',24)
-        self.text(62,43,'Choose a level',30,'#eee8c9',True)
-        self.text(64,94,'Survive 40 waves and protect your core.',13,'#aecdcf')
-        groups=('Easy','Medium','Hard')
-        for column,group in enumerate(groups):
-            xx=63+column*448
-            color=('#bbdda6','#ebce94','#e6b097')[column]
-            self.text(xx,151,group.upper(),19,color,True)
-            for row in range(3):
-                index=column*3+row
-                level=LEVELS[index]
-                yy=197+row*217
-                self.roundrect(xx,yy,418,195,'#1d3f4c','#456c73',r=13)
-                self.rect(xx+15,yy+15,7,43,level.ground)
-                self.text(xx+35,yy+19,f'{index+1}. {level.name}',19,'#e6e9d4',True)
-                self.text(xx+20,yy+69,level.description,11,'#b1cdcd',width=377)
-                label='PLAY AGAIN' if index in self.completed else 'DEPLOY ENGINEER'
-                self.button(xx+20,yy+136,378,40,label,('start',index,False),accent=color,size=11)
-        self.button(63,874,248,40,'BACK TO TITLE',('title',),size=11)
-        self.button(328,874,330,40,'Tutorial',('start',0,True),size=11)
-
-    def transition_screen(self):
-        if not self.transition:
-            return
-        t=self.transition['age']
-        fraction=ease(t/.36) if t<.36 else 1-ease((t-.36)/.4)
-        width=WIDTH*.5*fraction+2
-        self.rect(0,0,width,HEIGHT,'#102c3b')
-        self.rect(WIDTH-width,0,width,HEIGHT,'#102c3b')
-        self.line([(width,0),(width,HEIGHT)],'#a6d0ba',2)
-        self.line([(WIDTH-width,0),(WIDTH-width,HEIGHT)],'#a6d0ba',2)
-        if fraction>.94:
-            self.text(WIDTH/2,HEIGHT/2,TITLE,23,'#e7e7c9',True,anchor='center')
-
-    def frame(self):
-        if self.closed:
-            return
-        start=time.perf_counter()
-        dt=min(.08,start-self.last)
-        self.last=start
-        self.real_time+=dt
-        if self.transition:
-            self.transition['age']+=dt
-            if self.transition['age']>=.36 and not self.transition['switched']:
-                self.transition['switched']=True
-                action=self.transition['action']
-                if action[0]=='start':
-                    self.new_level(action[1],action[2])
-                else:
-                    self.state='title'
-                    self.panel=None
-                    self.paused=False
-            if self.transition['age']>=.76:
-                self.transition=None
-        running=self.state=='play' and not self.paused and not (self.panel and self.panel[0]=='help') and not self.world.outcome and not self.transition
-        if running:
-            self.accumulator+=dt
-            axis=(0,0) if self.panel else (int('d' in self.keys)-int('a' in self.keys),int('s' in self.keys)-int('w' in self.keys))
-            steps=0
-            while self.accumulator>=1/60 and steps<6:
-                self.world.update_field(1/60,axis,not self.panel and 'e' in self.keys,not self.panel and ('shift_l' in self.keys or 'shift_r' in self.keys))
-                self.accumulator-=1/60
-                steps+=1
-            if steps==6:
-                self.accumulator=min(self.accumulator,1/60)
-        else:
-            self.accumulator=0
-        self.camera.follow(self.world.player.pos,dt)
-        cw,ch=max(1,self.canvas.winfo_width()),max(1,self.canvas.winfo_height())
-        self.scale=min(cw/WIDTH,ch/HEIGHT)
-        self.offset=((cw-WIDTH*self.scale)/2,(ch-HEIGHT*self.scale)/2)
-        self.canvas.begin()
-        self.buttons=[]
-        if self.state=='title':
-            self.canvas.set_layer('hud')
-            self.title_screen()
-        elif self.state=='levels':
-            self.canvas.set_layer('hud')
-            self.level_screen()
-        else:
-            ui_clock=self.real_time
-            self.real_time=self.world.elapsed
-            self.terrain()
-            self.actors()
-            self.effects()
-            self.real_time=ui_clock
-            self.masks()
-            self.canvas.set_layer('hud')
-            self.header()
-            self.sidebar()
-            self.action_bar()
-            self.radar()
-            self.tutorial_card()
-            self.notices()
-            if self.paused or self.panel or self.world.outcome:
-                self.canvas.set_layer('modal')
-                if self.world.outcome:
-                    self.outcome_panel()
-                elif self.paused:
-                    self.pause_panel()
-                elif self.panel[0]=='robot':
-                    self.robot_panel(self.panel[1])
-                elif self.panel[0]=='core':
-                    self.core_panel()
-                else:
-                    self.help_panel()
-        self.canvas.set_layer('transition')
-        self.transition_screen()
-        self.canvas.end()
-        elapsed=time.perf_counter()-start
-        self.root.after(max(1,round((1/60-elapsed)*1000)),self.frame)
-
-
-if __name__ == '__main__':
-    EngineerGame().run()
