@@ -1,24 +1,29 @@
+# Authors: Woody Churchward, Kahekili Spears, Jack O'Brien
+# Date Created: 10/30/26
+# Date Modified: 10/31/26
+# Purpose: To create a fun game to play with friends
+
+
+
 # Blackwell V9
 from __future__ import annotations
-import base64
-import dataclasses
 import json
 import heapq
 import math
 import os
 import random
-import sys
 import time
 import textwrap
 import tkinter as tk
+import traceback
 from tkinter import messagebox
-from collections import defaultdict, OrderedDict
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional, Any
+from typing import Callable, Optional
 
 try:
-    from PIL import Image, ImageDraw, ImageFont, ImageTk, ImageEnhance
+    from PIL import Image, ImageDraw, ImageTk, ImageEnhance
 except ImportError as exc:
     raise SystemExit(
         "Pillow is needed for the custom pixel-art renderer. "
@@ -65,6 +70,23 @@ C = {
 
 def clamp(v, lo, hi):
     return max(lo, min(hi, v))
+
+
+def as_int(value, default=0):
+    """Tolerant int() for values read back from a save file."""
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def as_point(value):
+    """An (x, y) pair from a save file, or None if it is malformed."""
+    try:
+        x, y = value
+        return (float(x), float(y))
+    except (TypeError, ValueError):
+        return None
 
 
 def lerp(a, b, alpha):
@@ -1858,10 +1880,6 @@ SOLID_FURNITURE = {
     "coatstand": (-10, -17, 10, 29),
 }
 
-# The study has a visible walled-off staff office, with a walkable doorway.
-# The doorway itself is controlled by clothing or by careful sneaking.
-OFFICE_DOOR = (386, 423)
-
 
 def prop_collision(prop):
     """Solid pixel-art footprint. Tiny render shadows don't block movement."""
@@ -1878,18 +1896,6 @@ def prop_collision(prop):
     if kind == "telescope":
         ax, ay, bx, by = -21, 10, 29, 36
     return (x + ax, y + ay, x + bx, y + by)
-
-
-def walls_of_office():
-    left, top, right, bottom = RESTRICTED_ZONE
-    lo, hi = OFFICE_DOOR
-    return [
-        (left - 3, top, left + 2, bottom + 2),
-        (right - 2, top, right + 3, bottom + 2),
-        (left, top - 3, right, top + 2),
-        (left, bottom - 3, lo, bottom + 3),
-        (hi, bottom - 3, right, bottom + 3),
-    ]
 
 
 def build_collisions(props):
@@ -2531,29 +2537,6 @@ class PixelArt:
                 d.ellipse((lx - k, ly - k * .62, lx + k, ly + k * .62), fill=(*color, a))
         self.image = Image.alpha_composite(self.image.convert("RGBA"), overlay).convert("RGB")
         self.d = ImageDraw.Draw(self.image)
-
-    def restricted_office(self):
-        # Pixel-snapped corridor architecture. No polygons cross the crop edge.
-        p = self.palette
-        x1, y1, x2, y2 = RESTRICTED_ZONE
-        self.rect((x1, y1, x2, y2), shade(p["floor"], .80))
-        self.rect((x1 + 6, y1 + 7, x2 - 6, y2 - 6), None, shade(p["trim"], .80))
-        lo, hi = OFFICE_DOOR
-        self.rect((x1 - 3, y1, x1 + 2, y2 + 2), p["wall"], p["trim"])
-        self.rect((x2 - 2, y1, x2 + 3, y2 + 2), p["wall"], p["trim"])
-        self.rect((x1, y1 - 3, x2, y1 + 2), p["wall"], p["trim"])
-        self.rect((x1, y2 - 3, lo, y2 + 3), p["wall"], p["trim"])
-        self.rect((hi, y2 - 3, x2, y2 + 3), p["wall"], p["trim"])
-        # The dark threshold is an opening, not a wall painted onto the floor.
-        self.rect((lo + 2, y2 - 2, hi - 2, y2 + 3), shade(p["floor"], .64), shade(p["trim"], .7))
-        self.rect((lo - 4, y2 - 6, lo - 1, y2 + 8), p["trim"])
-        self.rect((hi + 1, y2 - 6, hi + 4, y2 + 8), p["trim"])
-        # A small engraved brass notice, as part of the building rather than a HUD label.
-        self.rect((x1 + 44, y1 + 9, x1 + 102, y1 + 20), (65, 55, 45), (139, 111, 69))
-        self.line((x1 + 50, y1 + 14, x1 + 96, y1 + 14), (179, 145, 88))
-        for n in range(4):
-            xx = x1 + 8 + n * 33
-            self.rect((xx, y2 - 18, xx + 20, y2 - 16), shade(p["trim"], .7))
 
     def render(self, level: Level):
         self.floor()
@@ -4650,7 +4633,6 @@ class RoomPainter(PixelArt):
             self.ellipse((224, 260, 306, 336), None, (104, 128, 147), 2)
 
     def _underground_architecture(self):
-        p = self.palette
         slate=(33,37,45) if self.chapter != 5 else (31,49,42)
         mortar=(74,71,76) if self.chapter != 5 else (76,87,77)
         self.rect((20, 39, 527, 357), slate)
@@ -4899,14 +4881,10 @@ class BlackwellGame:
         self.font_title = "Georgia"
         self.buttons: list[tuple[tuple[float, float, float, float], Callable]] = []
         self.mouse = (-100, -100)
-        self.mouse_world = None
         self.held: set[str] = set()
         self.release_jobs: dict[str, str] = {}
         self.click_destination: Optional[tuple[float, float]] = None
         self.click_path = []
-        self.guard_path = []
-        self.guard_path_goal = None
-        self.guard_route_refresh = 0.0
         self.screen = "menu"
         self.overlay = None
         self.screen_return = None
@@ -4933,21 +4911,14 @@ class BlackwellGame:
         self.transition_switched = False
         self.transition_duration = 1.7
         self.player = Agent(*self.world.start)
-        self.guard = Agent(248, 250, "right", coat=1, hair=2, skin=0, hat=True)
         self.watchmen: list[PatrolGuard] = []
-        self.guard_patrol_idx = 0
-        self.guard_mode = "patrol"
-        self.guard_alert = 0.0
-        self.guard_search = 0.0
-        self.guard_last_seen = None
-        self.patrol_pause = 0.0
         self.exposure = 0.0
+        self.peak_exposure = 0.0
         self.hidden = False
         self.blending = False
         self.crouched = False
         self.running = False
         self.focus = False
-        self.case_ready = False
         self.disguise = None  # None / "staff" / "guest"
         self.cover_blown = False
         self.scrutiny = 0.0
@@ -4990,11 +4961,9 @@ class BlackwellGame:
         self.dialogue_step = 0
         self.confront_step = 0
         self.deduction_chosen = None
-        self.case_transitions = 0
         self.end_grade = ""
         self.ui_scroll = 0
         self.name_entry: Optional[tk.Entry] = None
-        self.focus_button = 0
         self.name_entry_open = False
         self.particles = [(random.Random(i * 121 + 5).randrange(584), random.Random(i * 312 + 7).randrange(388)) for i in range(65)]
         self.load()
@@ -5022,10 +4991,15 @@ class BlackwellGame:
             "finished": self.finished,
             "progress": self.progress,
         }
+        # Write beside the real save and swap it in, so a crash mid-write
+        # cannot leave a truncated file behind.
+        tmp = SAVE_FILE.with_name(SAVE_FILE.name + ".tmp")
         try:
-            SAVE_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        except OSError:
-            pass
+            tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            os.replace(tmp, SAVE_FILE)
+        except OSError as exc:
+            traceback.print_exception(exc)
+            self.toast("Your progress could not be saved to disk.")
 
     def cache_progress(self):
         if self.screen not in {"game", "menu", "profile", "select", "help"}:
@@ -5042,6 +5016,7 @@ class BlackwellGame:
             "infiltration_uncovered": self.infiltration_uncovered,
             "player": [int(self.player.x), int(self.player.y)],
             "room": self.room_index,
+            "peak_exposure": round(self.peak_exposure, 1),
             "secret_unlocked": self.secret_unlocked,
             "room_positions": {str(k): list(v) for k, v in self.room_positions.items()},
         }
@@ -5059,8 +5034,11 @@ class BlackwellGame:
         old_avatar = data.get("avatar", {})
         if isinstance(old_avatar, dict):
             self.avatar.update({key: value for key, value in old_avatar.items() if key in self.avatar})
-        self.unlocked = int(clamp(data.get("unlocked", 0), 0, 9))
-        self.chapter = int(clamp(data.get("chapter", 0), 0, self.unlocked))
+        for key, size in (("skin", 4), ("hair", 4), ("coat", 4), ("hat", 2), ("accessory", 4)):
+            self.avatar[key] = as_int(self.avatar[key]) % size
+        self.avatar["name"] = str(self.avatar["name"])[:22] or "Detective"
+        self.unlocked = clamp(as_int(data.get("unlocked", 0)), 0, 9)
+        self.chapter = clamp(as_int(data.get("chapter", 0)), 0, self.unlocked)
         self.finished = bool(data.get("finished", False))
         self.progress = data.get("progress", {}) if isinstance(data.get("progress", {}), dict) else {}
         if not SAVE_FILE.exists():
@@ -5075,56 +5053,56 @@ class BlackwellGame:
         self._scene_ready = False
         self._background_id = None
         self.click_path = []
-        self.guard_path = []
-        self.guard_path_goal = None
-        self.guard_route_refresh = 0.0
         self.ambient = AmbientParticles(self.chapter)
         state = {} if reset else self.progress.get(str(self.chapter), {})
-        self.seen = set(int(v) for v in state.get("seen", []) if 0 <= int(v) < 3)
-        self.notes = set(int(v) for v in state.get("notes", []) if 0 <= int(v) < 3)
-        self.solved = set(int(v) for v in state.get("solved", []) if 0 <= int(v) < 3)
+        if not isinstance(state, dict):
+            state = {}
+
+        def saved_ids(key, limit):
+            values = state.get(key, [])
+            if not isinstance(values, list):
+                return set()
+            return {n for n in (as_int(v, -1) for v in values) if 0 <= n < limit}
+
+        self.seen = saved_ids("seen", 3)
+        # 0-2 are the margin notes; 3 and 4 are the two secret documents.
+        self.notes = saved_ids("notes", 5)
+        self.solved = saved_ids("solved", 3)
         self.witness_spoken = bool(state.get("witness_spoken", False))
-        self.wrong_attempts = int(state.get("wrong_attempts", 0))
+        self.wrong_attempts = as_int(state.get("wrong_attempts", 0))
         self.disguise = state.get("disguise") if state.get("disguise") in {"staff", "guest"} else None
         self.cover_blown = bool(state.get("cover_blown", False))
         self.scrutiny = 0.0
-        self.coins = int(clamp(state.get("coins", 3), 0, 5))
+        self.coins = clamp(as_int(state.get("coins", 3), 3), 0, 5)
         self.decoy = None
         self.decoy_expire = 0.0
         self.infiltration_uncovered = bool(state.get("infiltration_uncovered", False))
         self.secret_unlocked = bool(state.get("secret_unlocked", False))
         self.room_index = 0
-        self.room_positions = {int(k): v for k, v in state.get("room_positions", {}).items() if k in {"0", "1", "2"}}
+        saved_positions = state.get("room_positions", {})
+        if not isinstance(saved_positions, dict):
+            saved_positions = {}
+        self.room_positions = {int(k): pt for k, v in saved_positions.items()
+                               if k in {"0", "1", "2"} and (pt := as_point(v)) is not None}
+        target_room = as_int(state.get("room", 0)) if not reset else 0
+        if target_room not in (0, 1, 2):
+            target_room = 0
+        # "player" is where the detective stood in the room they saved in;
+        # switch_room() below restores it from room_positions.
+        saved_player = as_point(state.get("player"))
+        if saved_player is not None:
+            self.room_positions[target_room] = saved_player
         self.restricted_warning_at = -9.0
-        x, y = state.get("player", self.world.start)
-        x, y = find_nearest_open(self.world, (float(x), float(y)))
+        self.peak_exposure = clamp(float(as_int(state.get("peak_exposure", 0))), 0.0, 100.0)
+        x, y = self.world.start
         self.player = Agent(float(x), float(y), coat=int(self.avatar["coat"]), hair=int(self.avatar["hair"]), skin=int(self.avatar["skin"]), hat=bool(self.avatar["hat"]), accessory=int(self.avatar["accessory"]))
-        gx, gy = find_nearest_open(self.world, (270, 247))
-        self.guard = Agent(gx, gy, "right", coat=1, hair=2, skin=0, hat=True, accessory=3)
-        # Two recognizable security uniforms. The first walks a deliberate
-        # clockwise route near the private records. The second is a more
-        # perceptive enforcer stationed inside, with its own short patrol.
-        outer_route = [find_nearest_open(self.world, pt) for pt in self.world.patrol]
-        entry = find_nearest_open(self.world, outer_route[0])
-        self.guard.x, self.guard.y = entry
-        inner_route = [find_nearest_open(self.world, pt) for pt in
-                       [(402, 124), (470, 124), (470, 162), (404, 162)]]
-        inner = Agent(*inner_route[0], "left", coat=1, hair=2, skin=1, hat=True, accessory=3)
-        self.watchmen = [
-            PatrolGuard(self.guard, outer_route, "security"),
-            PatrolGuard(inner, inner_route, "enforcer"),
-        ]
-        self.guard_patrol_idx = 0
-        self.guard_mode = "patrol"
-        self.guard_alert = 0.0
-        self.guard_search = 0.0
-        self.guard_last_seen = None
+        # Guards belong to the private wing; switch_room() creates them.
+        self.watchmen = []
         self.exposure = 0.0
         self.hidden = False
         self.blending = False
         self.crouched = False
         self.running = False
-        self.case_ready = False
         self.click_destination = None
         self.last_tick = time.perf_counter()
         self.world_pil = None
@@ -5138,8 +5116,7 @@ class BlackwellGame:
         self.confront_step = 0
         self.focus = False
         self.clear_held()
-        target_room = int(state.get("room", 0)) if not reset else 0
-        self.switch_room(target_room if target_room in (0, 1, 2) else 0, arriving=True)
+        self.switch_room(target_room, arriving=True)
 
     def room_portals(self):
         # Transitions are attached to architectural features, not to unrelated
@@ -5191,7 +5168,12 @@ class BlackwellGame:
         secret_exit = find_nearest_open(self.world, SECRET_FEATURES[self.chapter][0])
         door_spawns = {0: (486, 213) if old_room == 1 else secret_exit,
                        1: (56, 209), 2: (278, 319)}
-        spawn = self.room_positions.get(dest, door_spawns[dest]) if arriving else door_spawns[dest]
+        # Arriving (loading a chapter) resumes where the detective last stood
+        # in that room, or at the room's entrance on a first visit.
+        if arriving:
+            spawn = self.room_positions.get(dest, self.world.start)
+        else:
+            spawn = door_spawns[dest]
         self.player.x, self.player.y = find_nearest_open(self.world, spawn)
         self.player.vx = self.player.vy = 0
         self.click_destination = None
@@ -5210,8 +5192,6 @@ class BlackwellGame:
                 g.route = [find_nearest_open(self.world, pos) for pos in g.route]
         else:
             self.watchmen = []
-        self.guard_path = []
-        self.guard_path_goal = None
         self._scene_ready = False
         self._background_id = None
         self.refresh_room_art()
@@ -5298,18 +5278,31 @@ class BlackwellGame:
         doubled = self.title_pil.resize((self.title_pil.width * scale, self.title_pil.height * scale), Image.Resampling.NEAREST)
         self.title_photo = ImageTk.PhotoImage(doubled)
 
+    def new_investigation(self):
+        has_progress = self.unlocked > 0 or any(
+            isinstance(state, dict) and (state.get("seen") or state.get("solved"))
+            for state in self.progress.values())
+        if has_progress and not messagebox.askyesno(
+                "New investigation",
+                "Start again from Chapter I?\n\nEvery saved case, clue and deduction will be erased.",
+                icon="warning", default="no", parent=self.root):
+            return
+        self.start_game(0, new=True)
+
     def start_game(self, chapter=None, new=False):
         if new:
             self.unlocked = 0
             self.finished = False
             self.progress = {}
+            self.thumbnails.clear()
             chapter = 0
         else:
             self.cache_progress()
         idx = self.chapter if chapter is None else int(chapter)
         self.prepare_chapter(idx, reset=new)
         self.screen = "game"
-        if new or not self.progress.get(str(idx), {}).get("seen"):
+        state = self.progress.get(str(idx))
+        if new or not (isinstance(state, dict) and state.get("seen")):
             self.cutscene_step = 0
             self.overlay = "cinematic"
         self.save()
@@ -5416,7 +5409,7 @@ class BlackwellGame:
         self.canvas.create_image(30, 92, image=self.title_photo, anchor="nw")
         self.rect(30, 92, 1197, 861, "", C["edge"], 2)
         # Ambient rain composited in front of the painted mansion.
-        for i, (base_x, base_y) in enumerate(self.particles[:95]):
+        for i, (base_x, base_y) in enumerate(self.particles):
             px = 30 + ((base_x * 2 + self.time_alive * (20 + i % 7 * 9)) % 1166)
             py = 92 + ((base_y * 2 + self.time_alive * (71 + i % 9 * 9)) % 767)
             self.line(px, py, px - 4, py + 10, fill="#476787", width=1)
@@ -5428,7 +5421,7 @@ class BlackwellGame:
         self.line(98, 364, 450, 364, fill=C["gold"], width=2)
         self.text(100, 379, "Truth hides in the details.", 14, C["muted"])
         self.button(96, 461, 310, 46, "CONTINUE", lambda: self.start_game(), primary=True)
-        self.button(96, 521, 310, 44, "NEW INVESTIGATION", lambda: self.start_game(0, True))
+        self.button(96, 521, 310, 44, "NEW INVESTIGATION", self.new_investigation)
         self.button(96, 578, 310, 44, "CHAPTER SELECT", lambda: self.open_screen("select"))
         self.button(96, 635, 310, 44, "DETECTIVE PROFILE", lambda: self.open_screen("profile"))
         self.button(96, 692, 310, 44, "SETTINGS / CONTROLS", lambda: self.open_screen("help"))
@@ -6095,7 +6088,6 @@ class BlackwellGame:
                 self.rect(xx, yy, xx + 2, yy + 1, "#8f6142")
         self.text(177, 206, "Connect what you found. Test the hypothesis. Defend your conclusion.", 12, "#f0dbc2")
         # A muted procedural red-thread network replaces generic number badges.
-        nodes = [(340, 347), (696, 353), (1051, 355)]
         self.line(340, 348, 693, 352, 1050, 352, fill="#a64f4f", width=3)
         self.line(347, 390, 520, 625, 684, 395, fill="#883944", width=2)
         for j, (question, clue, answer) in enumerate(ch["questions"]):
@@ -6283,7 +6275,10 @@ class BlackwellGame:
         self.unlocked = max(self.unlocked, min(9, self.chapter + 1))
         self.thumbnails.clear()
         self.finished = self.chapter == 9
-        self.end_grade = "GHOST" if self.exposure < 15 else "SLEUTH" if self.exposure < 50 else "SURVIVOR"
+        # Graded on the most attention drawn across the whole chapter, not the
+        # (necessarily low) awareness at the moment of the confrontation.
+        peak = self.peak_exposure
+        self.end_grade = "GHOST" if peak < 15 else "SLEUTH" if peak < 50 else "SURVIVOR"
         self.overlay = "chapter_end"
         self.save()
         self.redraw()
@@ -6449,7 +6444,9 @@ class BlackwellGame:
             return
         key, xy, display = near
         if key in {"archive_secret", "private_file"}:
-            note_id = 2 if key == "archive_secret" else 1
+            # Kept apart from the margin notes' ids (0-2), which are hidden
+            # once their number appears in self.notes.
+            note_id = 4 if key == "archive_secret" else 3
             self.notes.add(note_id)
             self.infiltration_uncovered = self.infiltration_uncovered or key == "private_file"
             self.show_caption(SECRET_REVEALS[self.chapter] if key == "private_file" else
@@ -6532,7 +6529,7 @@ class BlackwellGame:
     def restricted(self, x, y):
         # Security is confined to the private wing, not a hidden invisible
         # rectangle arbitrarily painted over the public investigation.
-        return self.room_index == 1 and x > 120
+        return self.security_zone((x, y))
 
     def authorized_in_office(self):
         return self.disguise == "staff" and not self.cover_blown
@@ -6656,8 +6653,6 @@ class BlackwellGame:
         if self.blending:
             speed = 30.0
         # Frames-per-second independent acceleration / deceleration.
-        old_vx = self.player.vx
-        old_vy = self.player.vy
         response = 1 - math.exp(-14.0 * dt) if (x or y) else 1 - math.exp(-19.5 * dt)
         self.player.vx = lerp(self.player.vx, x * speed, response)
         self.player.vy = lerp(self.player.vy, y * speed, response)
@@ -6667,7 +6662,6 @@ class BlackwellGame:
             self.player.vy = 0
         if self.hidden:
             self.player.vx = self.player.vy = 0
-        prev_x, prev_y = self.player.x, self.player.y
         self.move_agent(self.player, self.player.vx, self.player.vy, dt)
         # Trespassing is a SECURITY RULE, not an invisible wall. Anyone can
         # enter; only a suitable disguise makes it legitimate. Crouching still
@@ -6728,7 +6722,8 @@ class BlackwellGame:
         return False
 
     def security_zone(self, xy):
-        return self.room_index == 1 and xy[0] > 112
+        # Past the vestibule partition (x 112-122) in the private wing.
+        return self.room_index == 1 and xy[0] > 120
 
     def suspicious_to(self, watchman):
         if not self.security_zone(self.player.feet):
@@ -6794,6 +6789,7 @@ class BlackwellGame:
         """
         self.update_cover(dt)
         any_alert = 0.0
+        caught_by_contact = False
         for g in self.watchmen:
             visual = self.guard_can_see(g)
             illegal = self.suspicious_to(g)
@@ -6854,13 +6850,18 @@ class BlackwellGame:
                     self.guard_move(g, goal, 22 if g.rank == "enforcer" else 25, dt)
             any_alert = max(any_alert, g.notice)
             if g.mode == "pursue" and distance(g.actor.feet, self.player.feet) < 12:
-                self.exposure = 100
-        self.guard_mode = "chase" if any(g.mode == "pursue" for g in self.watchmen) else "patrol"
+                caught_by_contact = True
         self.exposure = max(0.0, min(100.0, max(any_alert, self.exposure - dt * 28)))
+        if caught_by_contact:
+            self.exposure = 100.0
+        self.peak_exposure = max(self.peak_exposure, self.exposure)
         if self.exposure >= 100:
             self.overlay = "caught"
             self.click_destination = None
             self.clear_held()
+            # update() only redraws while no overlay is open, so draw the
+            # capture screen now rather than freezing on the last frame.
+            self.redraw()
 
     def reset_after_capture(self):
         self.player.x, self.player.y = find_nearest_open(self.world, self.world.start)
@@ -6982,6 +6983,17 @@ class BlackwellGame:
     # -------- scheduled animation and rendering --------
     def update(self):
         now = time.perf_counter()
+        try:
+            self.step(now)
+        finally:
+            # Always schedule the next frame: an error in one tick must not
+            # silently stop the game loop. Tk still reports the exception.
+            try:
+                self.root.after(self.next_frame_delay(now), self.update)
+            except tk.TclError:
+                pass  # The window has been closed.
+
+    def step(self, now):
         dt = clamp(now - self.last_tick, 0.001, 0.085)
         self.last_tick = now
         self.time_alive += dt
@@ -6996,8 +7008,8 @@ class BlackwellGame:
             self.transition_time = time.perf_counter() - self.transition_started_at
             if self.transition_time >= self.transition_duration * 0.57 and not self.transition_switched:
                 self.transition_switched = True
+                # switch_room() redraws the scene, transition overlay included.
                 self.switch_room(self.transition_to)
-                self.canvas.delete("room_transition_fx")
             if self.transition_time >= self.transition_duration:
                 self.canvas.delete("room_transition_fx")
                 self.overlay = None
@@ -7015,11 +7027,15 @@ class BlackwellGame:
         if self.screen == "game" and self.overlay is None:
             try:
                 self.redraw()
-            except (tk.TclError, ValueError, IndexError, StopIteration) as exc:
-                import traceback
+            except (tk.TclError, ValueError, IndexError, StopIteration):
                 traceback.print_exc()
                 self.toast("A scene error was recovered. Your case progress is intact.")
                 self._scene_ready = False
+        elif self.screen in {"menu", "profile"}:
+            # Title rain and the profile's walking preview, at menu cadence.
+            self.redraw()
+
+    def next_frame_delay(self, now):
         # Measure how long this frame actually took and subtract that work
         # from the 30-fps budget. The old loop waited a whole frame AFTER
         # drawing, causing avoidable visible slowdowns on slower machines.
@@ -7027,10 +7043,10 @@ class BlackwellGame:
         budget_ms = STEP_INTERVAL * 1000.0
         target = max(1, round(budget_ms - elapsed_ms))
         if self.screen != "game":
-            target = 90  # Menus aren't animated; don't burn CPU offscreen.
+            target = 90  # Menus animate gently; don't burn CPU offscreen.
         elif self.overlay not in (None, "room_transition"):
             target = 55  # Paused dialogue / evidence doesn't need 30 updates.
-        self.root.after(target, self.update)
+        return target
 
     def redraw(self):
         if not self.canvas.winfo_exists():
@@ -7060,3 +7076,11 @@ if __name__ == "__main__":
     main()
 
 
+#Woody's PPR
+manor_hints = [
+    "YOUR HINT ABOUT THE ...",
+    "YOUR HINT ABOUT THE ...",
+    "YOUR HINT ABOUT THE ...",
+]
+
+class BlackwellGame:
