@@ -4866,6 +4866,22 @@ class TitleIllustration:
             if abs(rx - 278) < (ry - 310) * 1.7:
                 d.line((rx, ry, rx+self.rng.randrange(3, 23), ry), fill=self.rng.choice([(98, 90, 76), (141, 111, 71), (64, 85, 105)]))
         return im
+#Woody's PPR
+   
+manor_hints = [
+    "Everyone keeps quoting the exact same time. Take a closer look at the clock in the study.",
+    "Someone came in from the storm tonight. Check the floor for anything they left behind.",
+    "Not every paper in this house burned completely. What was someone so desperate to destroy?",
+]
+
+def get_hint(found_clues):
+        for i in range(len(manor_hints)):
+            if i not in found_clues:
+                return manor_hints[i]
+        return "You have all the evidence. Time to make your deduction."
+    
+
+
 
 class BlackwellGame:
     def __init__(self, root: tk.Tk):
@@ -6919,14 +6935,17 @@ class BlackwellGame:
                 self.toggle_hide()
             elif k == "b":
                 self.toggle_blend()
-            elif k == "v":
+            elif k == "v": #Woody's ppr
                 self.focus = True
             elif k == "q":
                 self.try_drop_coin()
+            elif k== "n":
+                if self.chapter ==0:
+                    self.show_caption(get_hint(self.seen))    
             elif k == "escape":
                 self.go_back()
             elif k == "space":
-                self.interact()
+                self.interact() #Woodys ppr end
         elif self.screen == "game" and self.overlay is not None:
             if k == "escape":
                 self.go_back()
@@ -7074,13 +7093,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-#Woody's PPR
-manor_hints = [
-    "YOUR HINT ABOUT THE ...",
-    "YOUR HINT ABOUT THE ...",
-    "YOUR HINT ABOUT THE ...",
-]
-
-class BlackwellGame:
