@@ -4892,7 +4892,8 @@ class BlackwellGame:
         root.minsize(SW, SH)
         root.resizable(False, False)
         self.canvas = tk.Canvas(root, width=SW, height=SH, bg=C["black"], highlightthickness=0)
-        self.canvas.pack()
+        # expand=True keeps the canvas centred when fullscreen is larger than it.
+        self.canvas.pack(expand=True)
         self.font_small = "Courier New"
         self.font_title = "Georgia"
         self.buttons: list[tuple[tuple[float, float, float, float], Callable]] = []
@@ -4992,7 +4993,11 @@ class BlackwellGame:
         root.bind("<Motion>", self.motion)
         root.bind("<MouseWheel>", self.wheel)
         root.bind("<FocusOut>", lambda ev: self.clear_held())
+        root.bind("<F11>", lambda ev: self.toggle_fullscreen())
         root.protocol("WM_DELETE_WINDOW", self.quit)
+        # On small screens the title bar and taskbar push the footer off-screen.
+        if root.winfo_screenwidth() < SW or root.winfo_screenheight() < SH + 80:
+            self.toggle_fullscreen()
         self.redraw()
         self.root.after(int(STEP_INTERVAL * 1000), self.update)
 
@@ -5436,6 +5441,7 @@ class BlackwellGame:
         self.text(96, 310, "SHADOWS", 40, C["ivory"], serif=True, bold=True)
         self.line(98, 364, 450, 364, fill=C["gold"], width=2)
         self.text(100, 379, "Truth hides in the details.", 14, C["muted"])
+        self.text(100, 415, "Stuck in The Manor? Press N for a hint.", 12, C["gold"])
         self.button(96, 461, 310, 46, "CONTINUE", lambda: self.start_game(), primary=True)
         self.button(96, 521, 310, 44, "NEW INVESTIGATION", self.new_investigation)
         self.button(96, 578, 310, 44, "CHAPTER SELECT", lambda: self.open_screen("select"))
@@ -5573,11 +5579,12 @@ class BlackwellGame:
             ("E / COATSTAND", "Choose a staff or guest disguise for infiltration."),
             ("V", "Hold to preview each guard's line-of-sight patrol."),
             ("Q", "Toss a coin to draw a guard toward its sound."),
+            ("N", "Get a hint about the next clue in The Manor."),
             ("ESC", "Close an overlay or return to the title screen."),
             ("MOUSE", "Choose dialogue, evidence and destinations."),
         ]
         for j, (key, explanation) in enumerate(instruction_rows):
-            yy = 210 + j * 39
+            yy = 210 + j * 37
             self.text(99, yy, key, 12, C["cyan"])
             self.text(283, yy, explanation, 12, C["ivory"], width=565)
         self.text(978, 150, "THE MYSTERY", 21, C["gold"], serif=True)
@@ -5977,7 +5984,10 @@ class BlackwellGame:
         if portal is not None:
             near = (portal[0], portal[1], "E  " + portal[2])
         self.rect(26, 793, 1412, 875, C["midnight"], C["edge"])
-        self.text(45, 814, "WASD Move    CTRL Quiet walk    E Interact    Q Coin    V Sightlines", 12, C["muted"])
+        controls = "WASD Move    CTRL Quiet walk    E Interact    Q Coin    V Sightlines"
+        if self.chapter == 0:
+            controls += "    N Hint"
+        self.text(45, 814, controls, 12, C["muted"])
         if near:
             key, pos, display = near
             self.text(46, 844, f"{display}   •   E", 13, C["gold"])
@@ -6977,10 +6987,17 @@ class BlackwellGame:
                 self.release_jobs.pop(key, None)
             self.release_jobs[k] = self.root.after(35, remove)
 
+    def toggle_fullscreen(self):
+        self.root.attributes("-fullscreen", not self.root.attributes("-fullscreen"))
+
     def motion(self, event):
+        if event.widget is self.root:
+            return  # The black fullscreen border is not part of the canvas.
         self.mouse = (event.x, event.y)
 
     def click(self, event):
+        if event.widget is self.root:
+            return
         xy = (event.x, event.y)
         for (x1, y1, x2, y2), callback in reversed(self.buttons):
             if x1 <= xy[0] <= x2 and y1 <= xy[1] <= y2:
