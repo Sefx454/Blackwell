@@ -13,13 +13,19 @@ import os
 import random
 import time
 import textwrap
+import struct
+import subprocess
+import sys
+import tempfile
+import threading
+import wave
 import tkinter as tk
 import traceback
 from tkinter import messagebox
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 try:
     from PIL import Image, ImageDraw, ImageTk, ImageEnhance
@@ -64,6 +70,88 @@ C = {
     "earth": "#4b352e",
     "shadow": "#111622",
 }
+
+#Kahekili's PPR
+def sfx(name):
+    if name == "menu_select":
+        pitch, waveform, duration, volume = 660, "square", 0.07, 0.18
+    elif name == "deduction_correct":
+        pitch, waveform, duration, volume = 880, "square", 0.14, 0.18
+    elif name == "deduction_wrong":
+        pitch, waveform, duration, volume = 180, "saw", 0.14, 0.18
+    elif name == "overlay_open":
+        pitch, waveform, duration, volume = 520, "triangle", 0.08, 0.18
+    elif name == "overlay_close":
+        pitch, waveform, duration, volume = 390, "triangle", 0.08, 0.18
+    elif name == "clue_found":
+        pitch, waveform, duration, volume = 880, "square", 0.14, 0.18
+    elif name == "coin":
+        pitch, waveform, duration, volume = 1200, "triangle", 0.06, 0.18
+    elif name == "coin_bounce":
+        pitch, waveform, duration, volume = 740, "square", 0.10, 0.12
+    elif name == "leave_hide":
+        pitch, waveform, duration, volume = 330, "triangle", 0.10, 0.18
+    elif name == "enter_hide":
+        pitch, waveform, duration, volume = 260, "square", 0.11, 0.18
+    elif name == "leave_blend":
+        pitch, waveform, duration, volume = 350, "triangle", 0.09, 0.18
+    elif name == "enter_blend":
+        pitch, waveform, duration, volume = 590, "triangle", 0.10, 0.18
+    elif name == "caught":
+        pitch, waveform, duration, volume = 110, "saw", 0.35, 0.22
+    else:
+        raise ValueError(f"Unknown sound effect: {name}")
+
+    sample_rate, samples = generate_sound(pitch, waveform, duration, volume)
+    threading.Thread(target=play_sound, args=(samples, sample_rate), daemon=True).start()
+
+
+def generate_sound(pitch, waveform, duration, volume):
+    pitch = clamp(float(pitch), 40, 1800)
+    sample_rate = 22050
+    count = int(sample_rate * duration)
+    samples = bytearray()
+    for i in range(count):
+        phase = (i * pitch / sample_rate) % 1.0
+        if waveform == "square":
+            sample = 1.0 if phase < 0.5 else -1.0
+        elif waveform == "triangle":
+            sample = 1.0 - 4.0 * abs(phase - 0.5)
+        else:  # saw
+            sample = 2.0 * phase - 1.0
+        fade = min(1.0, i / 180, (count - i - 1) / 300)
+        samples.extend(struct.pack("<h", int(sample * volume * max(0, fade) * 32767)))
+    return sample_rate, samples
+
+
+def play_sound(samples, sample_rate):
+    """Write generated samples to a temporary WAV and play it via the OS."""
+    path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            path = tmp.name
+        with wave.open(path, "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(sample_rate)
+            audio.writeframes(samples)
+        if sys.platform == "darwin":
+            command = ["afplay", path]
+        elif os.name == "nt":
+            import winsound
+            winsound.PlaySound(path, winsound.SND_FILENAME)
+            return
+        else:
+            command = ["aplay", "-q", path]
+        subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    except (OSError, wave.Error):
+        pass  # Audio output is optional; the game still works without a player.
+    finally:
+        if path:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
 
 
 def clamp(v, lo, hi):
@@ -222,9 +310,9 @@ class PatrolGuard:
     mode: str = "patrol"  # patrol, curious, investigate, search, pursue
     notice: float = 0.0
     linger: float = 0.0
-    last_known: Optional[tuple[float, float]] = None
+    last_known: Any = None
     path: list[tuple[float, float]] = field(default_factory=list)
-    path_goal: Optional[tuple[float, float]] = None
+    path_goal: Any = None
     repath: float = 0.0
     scan_clock: float = 0.0
     search_turns: int = 0
@@ -4919,9 +5007,10 @@ class BlackwellGame:
         self.root = root
         root.title("Blackwell: Into the Shadows")
         root.configure(bg=C["black"])
+        # Start at the game's full design size and let macOS/PyCharm maximize it.
         root.geometry(f"{SW}x{SH}")
-        root.minsize(SW, SH)
-        root.resizable(False, False)
+        root.minsize(900, 600)
+        root.resizable(True, True)
         self.canvas = tk.Canvas(root, width=SW, height=SH, bg=C["black"], highlightthickness=0)
         self.canvas.pack()
         self.font_small = "Courier New"
@@ -4930,7 +5019,7 @@ class BlackwellGame:
         self.mouse = (-100, -100)
         self.held: set[str] = set()
         self.release_jobs: dict[str, str] = {}
-        self.click_destination: Optional[tuple[float, float]] = None
+        self.click_destination: Any = None
         self.click_path = []
         self.screen = "menu"
         self.overlay = None
@@ -6120,6 +6209,7 @@ class BlackwellGame:
         self.text(163, 702, "SPACE  to continue", 12, C["cyan"])
 
     def advance_cinematic(self):
+        sfx("menu_select")
         self.cutscene_step += 1
         if self.cutscene_step >= 5:
             self.overlay = None
@@ -6240,6 +6330,7 @@ class BlackwellGame:
         options = self.deduction_options(idx)
         correct = CHAPTERS[self.chapter]["questions"][idx][2]
         self.answer_correct = options[selection] == correct
+        sfx("deduction_correct" if self.answer_correct else "deduction_wrong")
         if self.answer_correct:
             self.solved.add(idx)
             self.toast("The pieces fit. Another false story falls away.")
@@ -6660,10 +6751,12 @@ class BlackwellGame:
         self.redraw()
 
     def open_overlay(self, name):
+        sfx("overlay_open")
         self.overlay = name
         self.redraw()
 
     def close_overlay(self):
+        sfx("overlay_close")
         self.overlay = None
         self.deduction_chosen = None
         self.redraw()
@@ -6749,6 +6842,7 @@ class BlackwellGame:
             was_new = idx not in self.seen
             self.seen.add(idx)
             if was_new:
+                sfx("clue_found")
                 self.discovery_index = idx
                 self.overlay = "evidence"
                 self.show_caption(CHAPTERS[self.chapter]["cinematic"][5 + idx])
@@ -6831,6 +6925,8 @@ class BlackwellGame:
         target = (clamp(self.player.x + direction[0] * 56, 28, WORLD_W - 28),
                   clamp(self.player.y + direction[1] * 56, 43, WORLD_H - 25))
         self.coins -= 1
+        sfx("coin")
+        sfx("coin_bounce")
         self.decoy = target
         self.decoy_expire = self.time_alive + 1.35
         for g in self.watchmen:
@@ -6866,9 +6962,11 @@ class BlackwellGame:
     def toggle_hide(self):
         near = min((distance(self.player.feet, pos) for pos in self.world.hide_positions), default=999)
         if self.hidden:
+            sfx("leave_hide")
             self.hidden = False
             self.toast("You leave cover. The room feels far less forgiving.")
         elif near <= 26:
+            sfx("enter_hide")
             self.hidden = True
             self.blending = False
             self.click_destination = None
@@ -6880,9 +6978,11 @@ class BlackwellGame:
     def toggle_blend(self):
         in_crowd = any(distance(self.player.feet, (x, y)) < radius for x, y, radius in self.world.blend_zones)
         if self.blending:
+            sfx("leave_blend")
             self.blending = False
             self.toast("You drift away from the conversation.")
         elif in_crowd:
+            sfx("enter_blend")
             self.blending = True
             self.hidden = False
             self.running = False
@@ -7147,6 +7247,7 @@ class BlackwellGame:
         self.peak_exposure = max(self.peak_exposure, self.exposure)
         if self.exposure >= 100:
             if self.overlay != "caught":
+                sfx("caught")
                 self.spotted_count += 1
                 self.save()
             self.overlay = "caught"
