@@ -4,8 +4,7 @@
 # Purpose: To create a fun game to play with friends
 
 
-
-# Blackwell V9
+# Blackwell V16
 from __future__ import annotations
 import json
 import heapq
@@ -30,7 +29,7 @@ except ImportError as exc:
         "Install it with: python3 -m pip install pillow"
     ) from exc
 
-VERSION = "9"
+VERSION = "17"
 SW, SH = 1440, 900
 VIEW_X, VIEW_Y = 27, 89
 VIEW_W, VIEW_H = 996, 690
@@ -41,7 +40,6 @@ VISIBLE_H = VIEW_H / PIXEL_SCALE
 STEP_INTERVAL = 1 / 30
 SAVE_FILE = Path.home() / ".blackwell_ten_shadows_v3_save.json"
 OLD_SAVE_FILE = Path.home() / ".blackwell_ten_shadows_save.json"
-
 
 C = {
     "black": "#060e19",
@@ -176,7 +174,6 @@ class Level:
     cards: list[str]
 
 
-
 # Suspicion is NOT a world-wide switch. These distinct secure locations are
 # the only portions of a chapter where surveillance creates active danger.
 # The rest of the map is a public investigation space: there are real witnesses,
@@ -214,6 +211,7 @@ INVESTIGATION_STAKES = [
      "The token map, the founder's portrait, and the recorded confession establish her command over the chain of deaths."),
 ]
 
+
 @dataclass
 class PatrolGuard:
     """A real guard, rather than a sprite with an omniscient proximity trigger."""
@@ -221,7 +219,7 @@ class PatrolGuard:
     route: list[tuple[float, float]]
     rank: str = "security"
     waypoint: int = 0
-    mode: str = "patrol"                 # patrol, curious, investigate, search, pursue
+    mode: str = "patrol"  # patrol, curious, investigate, search, pursue
     notice: float = 0.0
     linger: float = 0.0
     last_known: Optional[tuple[float, float]] = None
@@ -232,1246 +230,1247 @@ class PatrolGuard:
     search_turns: int = 0
     warned: bool = False
 
-# TEN CHAPTERS / THIRTY DISTINCT REASONING TECHNIQUES
-METHODS = [   ('Chronology', 'Compare timestamps to expose a false timeline.'),
-    ('Contradiction', 'Find two claims that cannot both be true.'),
-    ('Trace analysis', 'Connect a physical trace to its source.'),
-    ('Alibi testing', "Cross-check a suspect's stated location."),
-    ('Document authentication', 'Identify a forged or altered document.'),
-    ('Motive mapping', 'Follow who benefits from the crime.'),
-    ('Spatial inference', 'Infer movement from room layout.'),
-    ('Witness triangulation', 'Reconcile conflicting eyewitness accounts.'),
-    ('Cipher breaking', 'Decode a concealed message.'),
-    ('Opportunity analysis', 'Establish access at the critical moment.'),
-    ('Pattern recognition', 'Spot a repeated signature across incidents.'),
-    ('Forensic comparison', 'Compare marks left by objects or tools.'),
-    ('Negative evidence', 'Reason from something conspicuously absent.'),
-    ('Behavioral profiling', 'Compare conduct to known habits.'),
-    ('Ledger reconciliation', 'Find a financial discrepancy.'),
-    ('Route reconstruction', "Rebuild a suspect's path."),
-    ('Sound localization', 'Locate a sound through testimony.'),
-    ('Material identification', 'Recognize a rare substance or fabric.'),
-    ('Chain of custody', 'Track who handled an item.'),
-    ('Codebook inference', 'Derive meaning from a recurring symbol.'),
-    ('Probability elimination', 'Discard incompatible explanations.'),
-    ('Security bypass analysis', 'Determine how safeguards failed.'),
-    ('Testimony sequencing', 'Put recollections into proper order.'),
-    ('Network analysis', 'Expose hidden associations between people.'),
-    ('Chemical residue', 'Interpret safe, non-actionable lab residue.'),
-    ('Handwriting comparison', 'Match distinctive letter forms.'),
-    ('Mechanical reconstruction', 'Infer how a mechanism was manipulated.'),
-    ('Identity verification', 'Compare claimed identity against records.'),
-    ('Deception detection', 'Recognize a deliberately staged scene.'),
-    ('Synthesis', 'Unite separate cases into one theory.')]
 
-CHAPTERS = [   {   'title': 'The Manor',
-        'place': 'Blackwell Manor',
-        'victim': 'Albert Blackwell',
-        'culprit': 'Mr. Collins',
-        'role': 'the estate steward',
-        'motive': 'his fear that Albert had discovered years of theft',
-        'scene': 'manor',
-        'threat': 'A storm batters the estate while someone inside keeps extinguishing lamps one by '
-                  'one.',
-        'intro': [   'The Blackwell family has money, enemies, and a talent for silence.',
-                     'Tonight the patriarch Albert Blackwell lies dead in his study while thunder '
-                     'drowns every scream.',
-                     'A woman calling herself Lady Evelyn presses a silver moth token into your '
-                     "hand and whispers: 'Do not trust the clocks.'"],
-        'reveal': 'Collins breaks when cornered. He admits the killing, but swears he was only the '
-                  'first hand used by a hidden patron.',
-        'aftermath': 'Inside his coat you find another silver moth and a ledger page naming a '
-                     'midnight delivery at Ashcroft Station.',
-        'witness': 'I heard the study door open long after the grandfather clock stopped. Someone '
-                   'wanted us all staring at the wrong hour.',
-        'clues': [   (   'Broken Clock',
-                         'The study clock froze at 9:30, but the mainspring was deliberately '
-                         'jammed.'),
-                     (   'Crescent Footprints',
-                         'Wet prints from the garden entrance show a crescent heel gouge.'),
-                     (   'Burned Trust Letter',
-                         'A half-burned notice demands missing trust funds be restored before '
-                         'dawn.')],
-        'questions': [   (   'Was the clock an honest timestamp?',
-                             'Broken Clock',
-                             'No. The clock was staged to create a false time of death.'),
-                         (   'Who entered through the garden?',
-                             'Crescent Footprints',
-                             "Collins's boots share the same crescent-cut heel."),
-                         (   'Why was Albert silenced?',
-                             'Burned Trust Letter',
-                             "Albert was about to expose Collins's embezzlement.")],
-        'cinematic': [   'I knew Albert Blackwell before I knew how to tell a convincing lie. He '
-                         'had three fears. Thunder was not one of them.',
-                         'The power fails. A gunshot is reported by the maid, but the body bears no '
-                         'gunshot wound.',
-                         'The family portrait above the stairs has been moved by half an inch. A '
-                         'space is visible where a second portrait once hung.',
-                         'Evelyn arrives before the constables. She has no umbrella and not a drop '
-                         'of rain on her coat.',
-                         "A whisper slips beneath the study door: 'He kept two ledgers. One for his "
-                         "friends, one for his family.'",
-                         'You find the broken clock, still ticking inside despite the hands being '
-                         'stopped at half past nine.',
-                         'A house full of people might have heard a scream. Every one of them '
-                         'claims to have heard the storm instead.',
-                         'Collins does not deny entering the study. He denies knowing what time it '
-                         'was, then quotes the stopped clock exactly.',
-                         'The first silver moth is cold in your hand. Its wings fit a notch carved '
-                         'into the study desk.',
-                         'An unsigned letter ends with three words: KEEP THEM QUIET.',
-                         'Lady Evelyn asks whether you believe the dead deserve justice, or merely '
-                         'a better story.',
-                         'When you confront Collins, his first question is not whether you have '
-                         'evidence. It is whether Evelyn is nearby.'],
-        'supporting': ['Margot', 'Edmund'],
-        'room_name': 'West Gallery',
-        'discovery_moments': [   'A small detail catches the light differently the second time you look.',
-                                 'You turn the item over slowly. Its meaning changes when you '
-                                 'remember what the witness said.',
-                                 'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
-        'dialogue': [   {   'speaker': 'Margot',
-                            'text': 'I knew Albert Blackwell. They were frightened in the days '
-                                    'before the murder. I keep thinking I should have said '
-                                    'something.'},
-                        {   'speaker': 'Detective',
-                            'text': 'Start from the last moment you saw them alive. Leave nothing '
-                                    'out, even what seems unimportant.'},
-                        {   'speaker': 'Margot',
-                            'text': 'I heard the study door open long after the grandfather clock '
-                                    'stopped. Someone wanted us all staring at the wrong hour.'},
-                        {   'speaker': 'Detective',
-                            'text': 'And who else knew you would be here tonight?'},
-                        {   'speaker': 'Margot',
-                            'text': 'There was a message with a silver moth on the seal. I thought '
-                                    'it was a family emblem.'},
-                        {   'speaker': 'Detective',
-                            'text': 'This is the tenth time someone has told me that. Not one of '
-                                    'them looked relieved.'},
-                        {   'speaker': 'Edmund',
-                            'text': 'The people who run this place have been told to pretend they '
-                                    'remember nothing.'},
-                        {   'speaker': 'Edmund',
-                            'text': 'Even if I told you what I saw, I doubt you would believe who '
-                                    'told me to stay silent.'},
-                        {   'speaker': 'Detective',
-                            'text': "I will decide what the evidence can support. I won't decide "
-                                    "before I've seen it."},
-                        {   'speaker': 'Margot',
-                            'text': "Then search the room. You may find the truth, but it won't "
-                                    'make this night easier.'}],
-        'suspect_speech': [   'You should have stayed away from Blackwell Manor. People who dig '
-                              'beneath a family usually find graves.',
-                              "I won't pretend I cared about Albert Blackwell. But you don't know "
-                              'who truly wanted this done.',
-                              "The silver moth is not a symbol of loyalty. It's a reminder that "
-                              'someone can always see the light you stand in.',
-                              'Ask Evelyn why your case file already existed before the murder was '
-                              'reported.'],
-        'deduction_decoys': [   [   'The damage was an ordinary accident at Blackwell Manor.',
-                                    'A stranger without access arrived after everyone left.'],
-                                [   'The witness mistook a harmless visitor for the suspect.',
-                                    'There is no reliable way to link the trace to any person.'],
-                                [   'The motive was a spontaneous argument unrelated to the '
-                                    'evidence.',
-                                    'The paperwork is genuine and the loss has no connection to the '
-                                    'death.']],
-        'journal_lore': [   'CASE 01 — THE MANOR',
-                            'Location of inquiry: Blackwell Manor',
-                            'Deceased: Albert Blackwell',
-                            'Current testimony suggests the public story about the death is '
-                            'incomplete.',
-                            'A silver moth token appears in the evidence chain yet again.',
-                            'The Blackwell family seems linked to the scene through a person, a '
-                            'document, or a piece of land.',
-                            "The night guard's patrol changes whenever anyone raises an alarm.",
-                            'The witness seems afraid of a threat beyond the murderer in this room.',
-                            'A false conclusion here could conceal evidence needed to unlock the '
-                            'next case.',
-                            'Only properly supported deductions can form the final accusation.'],
-        'suspect_alias': 'Mr. Collins'},
-    {   'title': 'The Midnight Train',
-        'place': 'Ashcroft Station',
-        'victim': 'Conductor Vale',
-        'culprit': 'Ada Mercer',
-        'role': 'a railway clerk',
-        'motive': 'to recover a passenger manifest tied to the Lantern network',
-        'scene': 'train',
-        'threat': 'Fog, steam, and the crush of travelers make it easy for someone to vanish '
-                  'between carriages.',
-        'intro': [   'The station master swears the train never stopped, yet a body disappeared all '
-                     'the same.',
-                     "Conductor Vale's lantern was found swinging from an empty caboose and a "
-                     "ticket was punched for a station that hasn't existed in thirty years.",
-                     "In Collins's pocket ledger, Ashcroft Station was circled twice in red ink."],
-        'reveal': 'Ada confesses she strangled Vale for the manifest, but claims the names on it '
-                  'frightened her more than the murder itself.',
-        'aftermath': "The manifest includes a physician from the Hollow Hotel and a note: 'Room 13 "
-                     "must remain sealed.'",
-        'witness': 'The woman in the blue coat stepped off after the bell, not before it. She '
-                   'walked like she already knew no one would stop her.',
-        'clues': [   (   'Obsolete Punch Mark',
-                         "The ticket was punched by a retired station tool kept in the clerk's "
-                         'office.'),
-                     (   "Porter's Statement",
-                         'A porter saw a woman in a blue coat leave after final departure.'),
-                     (   'Forged Shift Roster',
-                         "Ada's shift log was written with fresh ink over dried columns.")],
-        'questions': [   (   'Could the ticket have been punched on the train?',
-                             'Obsolete Punch Mark',
-                             'No. It came from a retired punch only Ada could access.'),
-                         (   'Who was seen leaving the carriage?',
-                             "Porter's Statement",
-                             'The porter identified Ada by her distinctive blue coat.'),
-                         (   "Does Ada's alibi survive scrutiny?",
-                             'Forged Shift Roster',
-                             'No. The roster was altered after the train had departed.')],
-        'cinematic': [   'The last train to Ashcroft is delayed by a signal nobody admits sending.',
-                         'Every passenger remembers a different conductor. Only the ticket stubs '
-                         'agree on his name.',
-                         "A child's toy clock ticks inside the empty compartment; its hands have no "
-                         'face.',
-                         'A whistle cuts through the fog, long after the rails should be silent.',
-                         'A woman in blue moves against the flow of passengers, carefully avoiding '
-                         'the station lamps.',
-                         "The punch mark is shaped like a moth's split wing. Its ink is older than "
-                         'the ticket.',
-                         'The porter insists he saw Ada. He refuses to say who ordered him to keep '
-                         'quiet.',
-                         'A manifest lists three passengers under names belonging to people buried '
-                         'years ago.',
-                         'Your own name appears in the luggage registry with the wrong date of '
-                         'birth.',
-                         'Behind the station wall, someone has scratched: THE TRACKS ONLY RUN IN '
-                         'ONE DIRECTION.',
-                         'Ada asks if a list of names can be a weapon. She does not wait for your '
-                         'answer.',
-                         'A train passes without stopping. In every window is a face you think you '
-                         'recognize.'],
-        'supporting': ['Porter Finch', 'Station Guard'],
-        'room_name': 'Platform Nine',
-        'discovery_moments': [   'A small detail catches the light differently the second time you look.',
-                                 'You turn the item over slowly. Its meaning changes when you '
-                                 'remember what the witness said.',
-                                 'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
-        'dialogue': [   {   'speaker': 'Porter Finch',
-                            'text': 'I knew Conductor Vale. They were frightened in the days before '
-                                    'the murder. I keep thinking I should have said something.'},
-                        {   'speaker': 'Detective',
-                            'text': 'Start from the last moment you saw them alive. Leave nothing '
-                                    'out, even what seems unimportant.'},
-                        {   'speaker': 'Porter Finch',
-                            'text': 'The woman in the blue coat stepped off after the bell, not '
-                                    'before it. She walked like she already knew no one would stop '
-                                    'her.'},
-                        {   'speaker': 'Detective',
-                            'text': 'And who else knew you would be here tonight?'},
-                        {   'speaker': 'Porter Finch',
-                            'text': 'There was a message with a silver moth on the seal. I thought '
-                                    'it was a family emblem.'},
-                        {   'speaker': 'Detective',
-                            'text': 'This is the tenth time someone has told me that. Not one of '
-                                    'them looked relieved.'},
-                        {   'speaker': 'Station Guard',
-                            'text': 'The people who run this place have been told to pretend they '
-                                    'remember nothing.'},
-                        {   'speaker': 'Station Guard',
-                            'text': 'Even if I told you what I saw, I doubt you would believe who '
-                                    'told me to stay silent.'},
-                        {   'speaker': 'Detective',
-                            'text': "I will decide what the evidence can support. I won't decide "
-                                    "before I've seen it."},
-                        {   'speaker': 'Porter Finch',
-                            'text': "Then search the room. You may find the truth, but it won't "
-                                    'make this night easier.'}],
-        'suspect_speech': [   'You should have stayed away from Ashcroft Station. People who dig '
-                              'beneath a family usually find graves.',
-                              "I won't pretend I cared about Conductor Vale. But you don't know who "
-                              'truly wanted this done.',
-                              "The silver moth is not a symbol of loyalty. It's a reminder that "
-                              'someone can always see the light you stand in.',
-                              'Ask Evelyn why your case file already existed before the murder was '
-                              'reported.'],
-        'deduction_decoys': [   [   'The damage was an ordinary accident at Ashcroft Station.',
-                                    'A stranger without access arrived after everyone left.'],
-                                [   'The witness mistook a harmless visitor for the suspect.',
-                                    'There is no reliable way to link the trace to any person.'],
-                                [   'The motive was a spontaneous argument unrelated to the '
-                                    'evidence.',
-                                    'The paperwork is genuine and the loss has no connection to the '
-                                    'death.']],
-        'journal_lore': [   'CASE 02 — THE MIDNIGHT TRAIN',
-                            'Location of inquiry: Ashcroft Station',
-                            'Deceased: Conductor Vale',
-                            'Current testimony suggests the public story about the death is '
-                            'incomplete.',
-                            'A silver moth token appears in the evidence chain yet again.',
-                            'The Blackwell family seems linked to the scene through a person, a '
-                            'document, or a piece of land.',
-                            "The night guard's patrol changes whenever anyone raises an alarm.",
-                            'The witness seems afraid of a threat beyond the murderer in this room.',
-                            'A false conclusion here could conceal evidence needed to unlock the '
-                            'next case.',
-                            'Only properly supported deductions can form the final accusation.'],
-        'suspect_alias': 'Ada Mercer'},
-    {   'title': 'The Hollow Hotel',
-        'place': 'Hollow Hotel',
-        'victim': 'Guest Rowan',
-        'culprit': 'Dr. Fenwick',
-        'role': 'the resident physician',
-        'motive': 'to conceal brutal experiments financed by the Lantern',
-        'scene': 'hotel',
-        'threat': 'Every corridor looks identical, every bell seems to ring from nowhere, and Room '
-                  '13 feels occupied even when empty.',
-        'intro': [   'At the Hollow Hotel, curtains remain drawn at noon and no guest asks for '
-                     'fresh towels twice.',
-                     'Rowan, a guest who requested police protection, is gone from a room bolted '
-                     'from within.',
-                     "Under the bed, you find the next silver moth and the words: 'A doctor can "
-                     "turn fear into obedience.'"],
-        'reveal': 'Fenwick collapses under questioning and points toward a recording stolen at the '
-                  'Gilded Theater—evidence he says could destroy the entire order.',
-        'aftermath': 'You recover a coded patient ledger and the reel number of a film hidden in '
-                     'the theater district.',
-        'witness': 'The bell rang from the hall after Rowan disappeared. I know because I had '
-                   'already collected the supper tray.',
-        'clues': [   (   'Duplicate Key Wax',
-                         'Wax impressions inside the lock preserve the outline of a second key.'),
-                     (   'False Medical Bill',
-                         'A hidden account lists treatments Rowan never authorized.'),
-                     (   'Bell Log',
-                         'The service bell rang after Rowan should already have been dead.')],
-        'questions': [   (   'How was the locked room illusion created?',
-                             'Duplicate Key Wax',
-                             'A duplicate key allowed Fenwick to enter and re-lock the room.'),
-                         (   'What was Fenwick hiding?',
-                             'False Medical Bill',
-                             'The bill concealed unauthorized treatments and extortion.'),
-                         (   "Who faked the victim's final timeline?",
-                             'Bell Log',
-                             'Fenwick rang the service bell from the hall after the murder.')],
-        'cinematic': [   'Room thirteen has been rented every Tuesday for nineteen years. The '
-                         'signatures are identical.',
-                         'The concierge refuses to call the missing guest by their name.',
-                         'A second key clinks in the ice bucket, though the ice has melted hours '
-                         'ago.',
-                         'The corridor mirror reflects a lamp that was extinguished yesterday.',
-                         'One guest remembers a scream. Another remembers a lullaby.',
-                         'In the basement an examination table lies beneath a sheet too clean for '
-                         'the room.',
-                         'The medical bills name treatments nobody remembers receiving.',
-                         "The physician's handwriting changes halfway through his notebook.",
-                         'Room thirteen smells faintly of burnt sugar and something chemical.',
-                         'Rowan sent a letter to Evelyn two days before the murder. Evelyn never '
-                         'mentioned it.',
-                         'A sealed envelope contains the single word: THEATER.',
-                         'Someone has been listening at the walls. The service bell rings once, '
-                         'then once more.'],
-        'supporting': ['Concierge Hale', 'Bellhop Owen'],
-        'room_name': 'East Corridor',
-        'discovery_moments': [   'A small detail catches the light differently the second time you look.',
-                                 'You turn the item over slowly. Its meaning changes when you '
-                                 'remember what the witness said.',
-                                 'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
-        'dialogue': [   {   'speaker': 'Concierge Hale',
-                            'text': 'I knew Guest Rowan. They were frightened in the days before '
-                                    'the murder. I keep thinking I should have said something.'},
-                        {   'speaker': 'Detective',
-                            'text': 'Start from the last moment you saw them alive. Leave nothing '
-                                    'out, even what seems unimportant.'},
-                        {   'speaker': 'Concierge Hale',
-                            'text': 'The bell rang from the hall after Rowan disappeared. I know '
-                                    'because I had already collected the supper tray.'},
-                        {   'speaker': 'Detective',
-                            'text': 'And who else knew you would be here tonight?'},
-                        {   'speaker': 'Concierge Hale',
-                            'text': 'There was a message with a silver moth on the seal. I thought '
-                                    'it was a family emblem.'},
-                        {   'speaker': 'Detective',
-                            'text': 'This is the tenth time someone has told me that. Not one of '
-                                    'them looked relieved.'},
-                        {   'speaker': 'Bellhop Owen',
-                            'text': 'The people who run this place have been told to pretend they '
-                                    'remember nothing.'},
-                        {   'speaker': 'Bellhop Owen',
-                            'text': 'Even if I told you what I saw, I doubt you would believe who '
-                                    'told me to stay silent.'},
-                        {   'speaker': 'Detective',
-                            'text': "I will decide what the evidence can support. I won't decide "
-                                    "before I've seen it."},
-                        {   'speaker': 'Concierge Hale',
-                            'text': "Then search the room. You may find the truth, but it won't "
-                                    'make this night easier.'}],
-        'suspect_speech': [   'You should have stayed away from Hollow Hotel. People who dig '
-                              'beneath a family usually find graves.',
-                              "I won't pretend I cared about Guest Rowan. But you don't know who "
-                              'truly wanted this done.',
-                              "The silver moth is not a symbol of loyalty. It's a reminder that "
-                              'someone can always see the light you stand in.',
-                              'Ask Evelyn why your case file already existed before the murder was '
-                              'reported.'],
-        'deduction_decoys': [   [   'The damage was an ordinary accident at Hollow Hotel.',
-                                    'A stranger without access arrived after everyone left.'],
-                                [   'The witness mistook a harmless visitor for the suspect.',
-                                    'There is no reliable way to link the trace to any person.'],
-                                [   'The motive was a spontaneous argument unrelated to the '
-                                    'evidence.',
-                                    'The paperwork is genuine and the loss has no connection to the '
-                                    'death.']],
-        'journal_lore': [   'CASE 03 — THE HOLLOW HOTEL',
-                            'Location of inquiry: Hollow Hotel',
-                            'Deceased: Guest Rowan',
-                            'Current testimony suggests the public story about the death is '
-                            'incomplete.',
-                            'A silver moth token appears in the evidence chain yet again.',
-                            'The Blackwell family seems linked to the scene through a person, a '
-                            'document, or a piece of land.',
-                            "The night guard's patrol changes whenever anyone raises an alarm.",
-                            'The witness seems afraid of a threat beyond the murderer in this room.',
-                            'A false conclusion here could conceal evidence needed to unlock the '
-                            'next case.',
-                            'Only properly supported deductions can form the final accusation.'],
-        'suspect_alias': 'Dr. Fenwick'},
-    {   'title': 'The Gilded Theater',
-        'place': 'Gilded Theater',
-        'victim': 'Singer Celeste',
-        'culprit': 'Victor Rook',
-        'role': 'the stage manager',
-        'motive': 'to suppress a recording naming Lantern trustees',
-        'scene': 'theater',
-        'threat': 'Crowds applaud while somebody backstage prepares another death behind velvet '
-                  'curtains.',
-        'intro': [   'Theater folk lie with style, but their props usually tell the truth.',
-                     "Celeste dies during a blackout timed to the final bow, and the night's master "
-                     'reel vanishes with her final note.',
-                     'In the wings you find another moth token pinned beneath a cue sheet.'],
-        'reveal': 'Rook admits engineering the blackout and says the missing reel names the people '
-                  'who funded every death so far.',
-        'aftermath': 'Taped beneath the empty canister is a list of trustees and a registry code '
-                     'tied to the Old Quarter archives.',
-        'witness': "The stage went dark a breath too early. Only the manager's cue sheet ever "
-                   'leaves no room for improvisation.',
-        'clues': [   (   'Blackout Cue',
-                         "An additional blackout note was penciled into the manager's master cue "
-                         'sheet.'),
-                     (   'Velvet Fiber',
-                         "Red velvet threads from Rook's sleeve cling to the trapdoor latch."),
-                     (   'Hollow Film Canister',
-                         'The canister is empty, but a hidden list of names is taped underneath '
-                         'it.')],
-        'questions': [   (   'Who controlled the blackout?',
-                             'Blackout Cue',
-                             'Rook inserted the unauthorized lighting cue himself.'),
-                         (   'Who reached the trapdoor?',
-                             'Velvet Fiber',
-                             "The trapdoor snagged fibers from Rook's jacket sleeve."),
-                         (   'Why was Celeste killed?',
-                             'Hollow Film Canister',
-                             'She had evidence naming Lantern trustees on the stolen reel.')],
-        'cinematic': [   'The applause goes on after the lights cut out, as if the audience cannot '
-                         'bear to hear silence.',
-                         "Celeste's final line was changed on the night of her death. Her "
-                         'understudy cannot say who changed it.',
-                         'The stage manager carries two cue sheets. One contains a blackout nobody '
-                         'rehearsed.',
-                         'A red velvet thread catches on a brass latch beneath the boards.',
-                         'Backstage, a phonograph plays a voice repeating a list of surnames.',
-                         'The projectionist says someone swapped reels during the third act.',
-                         "A torn ticket in the wings bears the crest of the city's oldest court.",
-                         'The director calls it an accident. He is smiling when he says it.',
-                         'A masked performer follows you between the curtains, then vanishes into '
-                         'the wings.',
-                         'The hidden list in the canister contains one family name twice.',
-                         'Evelyn appears in a private balcony reserved for empty seats.',
-                         'The house lights rise. No one has the courage to applaud.'],
-        'supporting': ['Understudy Rose', 'Projectionist Lin'],
-        'room_name': 'Stage Wings',
-        'discovery_moments': [   'A small detail catches the light differently the second time you look.',
-                                 'You turn the item over slowly. Its meaning changes when you '
-                                 'remember what the witness said.',
-                                 'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
-        'dialogue': [   {   'speaker': 'Understudy Rose',
-                            'text': 'I knew Singer Celeste. They were frightened in the days before '
-                                    'the murder. I keep thinking I should have said something.'},
-                        {   'speaker': 'Detective',
-                            'text': 'Start from the last moment you saw them alive. Leave nothing '
-                                    'out, even what seems unimportant.'},
-                        {   'speaker': 'Understudy Rose',
-                            'text': "The stage went dark a breath too early. Only the manager's cue "
-                                    'sheet ever leaves no room for improvisation.'},
-                        {   'speaker': 'Detective',
-                            'text': 'And who else knew you would be here tonight?'},
-                        {   'speaker': 'Understudy Rose',
-                            'text': 'There was a message with a silver moth on the seal. I thought '
-                                    'it was a family emblem.'},
-                        {   'speaker': 'Detective',
-                            'text': 'This is the tenth time someone has told me that. Not one of '
-                                    'them looked relieved.'},
-                        {   'speaker': 'Projectionist Lin',
-                            'text': 'The people who run this place have been told to pretend they '
-                                    'remember nothing.'},
-                        {   'speaker': 'Projectionist Lin',
-                            'text': 'Even if I told you what I saw, I doubt you would believe who '
-                                    'told me to stay silent.'},
-                        {   'speaker': 'Detective',
-                            'text': "I will decide what the evidence can support. I won't decide "
-                                    "before I've seen it."},
-                        {   'speaker': 'Understudy Rose',
-                            'text': "Then search the room. You may find the truth, but it won't "
-                                    'make this night easier.'}],
-        'suspect_speech': [   'You should have stayed away from Gilded Theater. People who dig '
-                              'beneath a family usually find graves.',
-                              "I won't pretend I cared about Singer Celeste. But you don't know who "
-                              'truly wanted this done.',
-                              "The silver moth is not a symbol of loyalty. It's a reminder that "
-                              'someone can always see the light you stand in.',
-                              'Ask Evelyn why your case file already existed before the murder was '
-                              'reported.'],
-        'deduction_decoys': [   [   'The damage was an ordinary accident at Gilded Theater.',
-                                    'A stranger without access arrived after everyone left.'],
-                                [   'The witness mistook a harmless visitor for the suspect.',
-                                    'There is no reliable way to link the trace to any person.'],
-                                [   'The motive was a spontaneous argument unrelated to the '
-                                    'evidence.',
-                                    'The paperwork is genuine and the loss has no connection to the '
-                                    'death.']],
-        'journal_lore': [   'CASE 04 — THE GILDED THEATER',
-                            'Location of inquiry: Gilded Theater',
-                            'Deceased: Singer Celeste',
-                            'Current testimony suggests the public story about the death is '
-                            'incomplete.',
-                            'A silver moth token appears in the evidence chain yet again.',
-                            'The Blackwell family seems linked to the scene through a person, a '
-                            'document, or a piece of land.',
-                            "The night guard's patrol changes whenever anyone raises an alarm.",
-                            'The witness seems afraid of a threat beyond the murderer in this room.',
-                            'A false conclusion here could conceal evidence needed to unlock the '
-                            'next case.',
-                            'Only properly supported deductions can form the final accusation.'],
-        'suspect_alias': 'Victor Rook'},
-    {   'title': 'The Old Quarter',
-        'place': 'Old Quarter Archives',
-        'victim': 'Archivist Bell',
-        'culprit': 'Nora Voss',
-        'role': 'the city registrar',
-        'motive': 'to erase the true Blackwell bloodline from public record',
-        'scene': 'quarter',
-        'threat': 'Firelight and ash hide a second crime scene among alleys that seem to rearrange '
-                  'themselves.',
-        'intro': [   'When records burn, somebody profits from forgetting.',
-                     'A controlled blaze destroys one wall of the municipal archive, yet the flames '
-                     'somehow spared a single family register.',
-                     "Bell dies clutching a scrap of genealogy and the phrase: 'The first branch "
-                     "was cut on purpose.'"],
-        'reveal': 'Voss swears she erased the line because it pointed to a woman who built the '
-                  'Lantern long before the murders began.',
-        'aftermath': 'The surviving branch leads to a Blackwell matriarch and to a conservatory '
-                     'donor named Silas Wren.',
-        'witness': 'Only those pages burned. The rest of the room smoked, but the Blackwell indexes '
-                   'vanished like they had been selected first.',
-        'clues': [   (   'Charred Register',
-                         'The destroyed pages all indexed Blackwell family births and marriages.'),
-                     (   'Private Seal Fragment',
-                         "A wax seal from a private registrar's signet was left near the ash pan."),
-                     (   'Arcade Sketch',
-                         'A witness drew the escape route through the market arcade to a '
-                         "registrar's side entrance.")],
-        'questions': [   (   'Which records were actually targeted?',
-                             'Charred Register',
-                             'The fire focused on the Blackwell lineage pages.'),
-                         (   'Who authorized their destruction?',
-                             'Private Seal Fragment',
-                             "The seal belongs to Nora Voss's private signet."),
-                         (   'How did the culprit escape unseen?',
-                             'Arcade Sketch',
-                             "The sketch traces directly back to Voss's office entrance.")],
-        'cinematic': [   'The archive is burning, but the fire follows the shelves like it can '
-                         'read.',
-                         "A registrar's seal rolls across the ash and comes to rest at your shoe.",
-                         'Archivist Bell left a scrap showing a marriage entered twice under two '
-                         'different names.',
-                         'A door to the arcade was locked from the outside, then opened with a key '
-                         'from within.',
-                         'The smoke hides a silhouette on the mezzanine, motionless and watching.',
-                         "The city historian will not speak until the mayor's carriage leaves.",
-                         'Old portraits show a Blackwell child who is absent from the family tree.',
-                         'A witness sketches the alley from memory, including a shutter painted '
-                         'shut years ago.',
-                         'Nora Voss keeps a ledger of every name she has erased.',
-                         'For the first time, you wonder whether Albert was ever the head of his '
-                         'own house.',
-                         'A scorched page contains a family motto: WHAT IS UNWRITTEN CANNOT DIE.',
-                         'A bell rings twelve times from a tower that has no working clock.'],
-        'supporting': ['Mrs. Alder', 'Watchman Fox'],
-        'room_name': 'Archive Gallery',
-        'discovery_moments': [   'A small detail catches the light differently the second time you look.',
-                                 'You turn the item over slowly. Its meaning changes when you '
-                                 'remember what the witness said.',
-                                 'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
-        'dialogue': [   {   'speaker': 'Mrs. Alder',
-                            'text': 'I knew Archivist Bell. They were frightened in the days before '
-                                    'the murder. I keep thinking I should have said something.'},
-                        {   'speaker': 'Detective',
-                            'text': 'Start from the last moment you saw them alive. Leave nothing '
-                                    'out, even what seems unimportant.'},
-                        {   'speaker': 'Mrs. Alder',
-                            'text': 'Only those pages burned. The rest of the room smoked, but the '
-                                    'Blackwell indexes vanished like they had been selected first.'},
-                        {   'speaker': 'Detective',
-                            'text': 'And who else knew you would be here tonight?'},
-                        {   'speaker': 'Mrs. Alder',
-                            'text': 'There was a message with a silver moth on the seal. I thought '
-                                    'it was a family emblem.'},
-                        {   'speaker': 'Detective',
-                            'text': 'This is the tenth time someone has told me that. Not one of '
-                                    'them looked relieved.'},
-                        {   'speaker': 'Watchman Fox',
-                            'text': 'The people who run this place have been told to pretend they '
-                                    'remember nothing.'},
-                        {   'speaker': 'Watchman Fox',
-                            'text': 'Even if I told you what I saw, I doubt you would believe who '
-                                    'told me to stay silent.'},
-                        {   'speaker': 'Detective',
-                            'text': "I will decide what the evidence can support. I won't decide "
-                                    "before I've seen it."},
-                        {   'speaker': 'Mrs. Alder',
-                            'text': "Then search the room. You may find the truth, but it won't "
-                                    'make this night easier.'}],
-        'suspect_speech': [   'You should have stayed away from Old Quarter Archives. People who '
-                              'dig beneath a family usually find graves.',
-                              "I won't pretend I cared about Archivist Bell. But you don't know who "
-                              'truly wanted this done.',
-                              "The silver moth is not a symbol of loyalty. It's a reminder that "
-                              'someone can always see the light you stand in.',
-                              'Ask Evelyn why your case file already existed before the murder was '
-                              'reported.'],
-        'deduction_decoys': [   [   'The damage was an ordinary accident at Old Quarter Archives.',
-                                    'A stranger without access arrived after everyone left.'],
-                                [   'The witness mistook a harmless visitor for the suspect.',
-                                    'There is no reliable way to link the trace to any person.'],
-                                [   'The motive was a spontaneous argument unrelated to the '
-                                    'evidence.',
-                                    'The paperwork is genuine and the loss has no connection to the '
-                                    'death.']],
-        'journal_lore': [   'CASE 05 — THE OLD QUARTER',
-                            'Location of inquiry: Old Quarter Archives',
-                            'Deceased: Archivist Bell',
-                            'Current testimony suggests the public story about the death is '
-                            'incomplete.',
-                            'A silver moth token appears in the evidence chain yet again.',
-                            'The Blackwell family seems linked to the scene through a person, a '
-                            'document, or a piece of land.',
-                            "The night guard's patrol changes whenever anyone raises an alarm.",
-                            'The witness seems afraid of a threat beyond the murderer in this room.',
-                            'A false conclusion here could conceal evidence needed to unlock the '
-                            'next case.',
-                            'Only properly supported deductions can form the final accusation.'],
-        'suspect_alias': 'Nora Voss'},
-    {   'title': 'The Glass Conservatory',
-        'place': 'Glass Conservatory',
-        'victim': 'Botanist Iris',
-        'culprit': 'Silas Wren',
-        'role': 'a wealthy patron',
-        'motive': "to sell a discovery tied to the Lantern's meeting place",
-        'scene': 'conservatory',
-        'threat': 'Moonlight through shattered glass makes every shadow look like an intruder.',
-        'intro': [   'The conservatory should have smelled of earth and orchids. Instead it smells '
-                     'of rain and broken glass.',
-                     'Botanist Iris is found beside a smashed specimen cabinet, her hands stained '
-                     'green from a plant she died protecting.',
-                     "Pinned to a potting table is another moth token and a buyer's receipt torn in "
-                     'half.'],
-        'reveal': "Wren admits ordering the theft of Iris's specimen because it marked the route to "
-                  'the hidden docks used by the Lantern.',
-        'aftermath': "On the reverse of the buyer's receipt you find tide coordinates and the name "
-                     'Pike.',
-        'witness': 'She told me her sponsor smiled too easily. People who own glass houses should '
-                   'not carry stones in their pockets.',
-        'clues': [   (   'Inward Glass Fall',
-                         'The shards fell inward, proving the window was broken from outside.'),
-                     (   'Missing Inventory Slip',
-                         'One specimen was removed before the official audit began.'),
-                     (   'Betrayal Note',
-                         "Iris's final note says her own sponsor arranged the theft.")],
-        'questions': [   (   'Where did the intruder first enter?',
-                             'Inward Glass Fall',
-                             'The window was smashed from the garden side.'),
-                         (   'What was stolen before the murder?',
-                             'Missing Inventory Slip',
-                             "Wren arranged the specimen's removal ahead of the audit."),
-                         (   'Whom did Iris accuse?',
-                             'Betrayal Note',
-                             'The note identifies her sponsor, Silas Wren.')],
-        'cinematic': [   'The glasshouse turns moonlight into shards of pale blue, and every leaf '
-                         'casts a knife-like shadow.',
-                         'Botanist Iris died with soil beneath her nails and a pressed flower '
-                         'hidden under her tongue.',
-                         'One specimen is gone, yet the empty shelf contains fresh water from the '
-                         'docks.',
-                         "A sponsor's name has been scratched from a brass plaque.",
-                         'The greenhouse attendant saw someone leave through the gardens without '
-                         'using the path.',
-                         'A moth token hangs from the frame of a cracked pane.',
-                         'The surviving orchids have been watered with saltwater, which should have '
-                         'killed them.',
-                         "A half-written letter begins: 'Silas, the map is not a map.'",
-                         "The patron's carriage arrives and leaves with one more trunk than it came "
-                         'with.',
-                         'You hear a glass panel shift in the rafters. A shadow is keeping pace '
-                         'above you.',
-                         "The plant's roots trace the direction of a buried drainage channel.",
-                         "Iris's last words were about a ship, not a flower."],
-        'supporting': ['Attendant Vera', 'Groundskeeper Ned'],
-        'room_name': 'Glasshouse Walk',
-        'discovery_moments': [   'A small detail catches the light differently the second time you look.',
-                                 'You turn the item over slowly. Its meaning changes when you '
-                                 'remember what the witness said.',
-                                 'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
-        'dialogue': [   {   'speaker': 'Attendant Vera',
-                            'text': 'I knew Botanist Iris. They were frightened in the days before '
-                                    'the murder. I keep thinking I should have said something.'},
-                        {   'speaker': 'Detective',
-                            'text': 'Start from the last moment you saw them alive. Leave nothing '
-                                    'out, even what seems unimportant.'},
-                        {   'speaker': 'Attendant Vera',
-                            'text': 'She told me her sponsor smiled too easily. People who own '
-                                    'glass houses should not carry stones in their pockets.'},
-                        {   'speaker': 'Detective',
-                            'text': 'And who else knew you would be here tonight?'},
-                        {   'speaker': 'Attendant Vera',
-                            'text': 'There was a message with a silver moth on the seal. I thought '
-                                    'it was a family emblem.'},
-                        {   'speaker': 'Detective',
-                            'text': 'This is the tenth time someone has told me that. Not one of '
-                                    'them looked relieved.'},
-                        {   'speaker': 'Groundskeeper Ned',
-                            'text': 'The people who run this place have been told to pretend they '
-                                    'remember nothing.'},
-                        {   'speaker': 'Groundskeeper Ned',
-                            'text': 'Even if I told you what I saw, I doubt you would believe who '
-                                    'told me to stay silent.'},
-                        {   'speaker': 'Detective',
-                            'text': "I will decide what the evidence can support. I won't decide "
-                                    "before I've seen it."},
-                        {   'speaker': 'Attendant Vera',
-                            'text': "Then search the room. You may find the truth, but it won't "
-                                    'make this night easier.'}],
-        'suspect_speech': [   'You should have stayed away from Glass Conservatory. People who dig '
-                              'beneath a family usually find graves.',
-                              "I won't pretend I cared about Botanist Iris. But you don't know who "
-                              'truly wanted this done.',
-                              "The silver moth is not a symbol of loyalty. It's a reminder that "
-                              'someone can always see the light you stand in.',
-                              'Ask Evelyn why your case file already existed before the murder was '
-                              'reported.'],
-        'deduction_decoys': [   [   'The damage was an ordinary accident at Glass Conservatory.',
-                                    'A stranger without access arrived after everyone left.'],
-                                [   'The witness mistook a harmless visitor for the suspect.',
-                                    'There is no reliable way to link the trace to any person.'],
-                                [   'The motive was a spontaneous argument unrelated to the '
-                                    'evidence.',
-                                    'The paperwork is genuine and the loss has no connection to the '
-                                    'death.']],
-        'journal_lore': [   'CASE 06 — THE GLASS CONSERVATORY',
-                            'Location of inquiry: Glass Conservatory',
-                            'Deceased: Botanist Iris',
-                            'Current testimony suggests the public story about the death is '
-                            'incomplete.',
-                            'A silver moth token appears in the evidence chain yet again.',
-                            'The Blackwell family seems linked to the scene through a person, a '
-                            'document, or a piece of land.',
-                            "The night guard's patrol changes whenever anyone raises an alarm.",
-                            'The witness seems afraid of a threat beyond the murderer in this room.',
-                            'A false conclusion here could conceal evidence needed to unlock the '
-                            'next case.',
-                            'Only properly supported deductions can form the final accusation.'],
-        'suspect_alias': 'Silas Wren'},
-    {   'title': 'The Drowned Docks',
-        'place': 'Drowned Docks',
-        'victim': 'Courier Nash',
-        'culprit': 'Harbor Master Pike',
-        'role': 'the harbor master',
-        'motive': 'to smuggle Lantern correspondence through an unlisted quay',
-        'scene': 'docks',
-        'threat': 'Fog horns, dark water, and stacked crates leave countless blind corners for an '
-                  'ambush.',
-        'intro': [   "Nash's satchel washed ashore without the letter it was meant to protect.",
-                     'The harbor records show no unusual traffic, which usually means every unusual '
-                     'thing was paid for in cash.',
-                     'Inside the satchel lining you discover a damp moth token and an address at '
-                     'the old observatory.'],
-        'reveal': 'Pike tries to flee by launch and admits he only moved the messages; he never '
-                  'learned why the observatory mattered.',
-        'aftermath': 'The recovered correspondence mentions a rooftop meeting under a telescope and '
-                     'orders from Professor Crane.',
-        'witness': 'The current never would have carried the satchel from the public pier. Whoever '
-                   'tossed it did so from somewhere private.',
-        'clues': [   (   'Contrary Tide Chart',
-                         'The tide direction proves the satchel came from the private quay, not the '
-                         'public pier.'),
-                     (   'Braided Mooring Rope',
-                         "A rare rope braid matches the harbor master's launch."),
-                     (   'Forged Cargo Docket',
-                         "An unlisted vessel arrived under a false name in Pike's own ledger.")],
-        'questions': [   (   'Where was the satchel actually dumped?',
-                             'Contrary Tide Chart',
-                             "The current points back to Pike's private quay."),
-                         (   'Which launch was used?',
-                             'Braided Mooring Rope',
-                             "The distinctive braid identifies Pike's launch."),
-                         (   "Who hid the vessel's arrival?",
-                             'Forged Cargo Docket',
-                             'Pike altered the harbor register himself.')],
-        'cinematic': [   'The docks swallow sound. Even your footsteps seem late returning from the '
-                         'fog.',
-                         "Nash's satchel is found where the tide could not have carried it.",
-                         'The harbor watch checks the same crate three times and never looks '
-                         'inside.',
-                         'Somebody has cut the lamps along the private quay.',
-                         "Pike's boat leaves no wake on the ledger, but its rope is wet.",
-                         'A cargo docket names a ship that was officially destroyed fourteen years '
-                         'ago.',
-                         'A lantern blinks from the far jetty: one long, two short, one long.',
-                         'In the fog, a hooded figure walks straight into a line of stacked crates '
-                         'and disappears.',
-                         'A note in the satchel reads: LOOK UP WHEN THE CITY LOOKS DOWN.',
-                         "Pike's ledger has a faint outline of a moth pressed through the page.",
-                         'The tide turns before dawn. You have only a narrow window to reach the '
-                         'observatory.',
-                         'From the pier the courthouse tower looks exactly like a lighthouse with '
-                         'its light put out.'],
-        'supporting': ['Sailor Bram', 'Dockhand Moss'],
-        'room_name': 'Moonlit Quay',
-        'discovery_moments': [   'A small detail catches the light differently the second time you look.',
-                                 'You turn the item over slowly. Its meaning changes when you '
-                                 'remember what the witness said.',
-                                 'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
-        'dialogue': [   {   'speaker': 'Sailor Bram',
-                            'text': 'I knew Courier Nash. They were frightened in the days before '
-                                    'the murder. I keep thinking I should have said something.'},
-                        {   'speaker': 'Detective',
-                            'text': 'Start from the last moment you saw them alive. Leave nothing '
-                                    'out, even what seems unimportant.'},
-                        {   'speaker': 'Sailor Bram',
-                            'text': 'The current never would have carried the satchel from the '
-                                    'public pier. Whoever tossed it did so from somewhere private.'},
-                        {   'speaker': 'Detective',
-                            'text': 'And who else knew you would be here tonight?'},
-                        {   'speaker': 'Sailor Bram',
-                            'text': 'There was a message with a silver moth on the seal. I thought '
-                                    'it was a family emblem.'},
-                        {   'speaker': 'Detective',
-                            'text': 'This is the tenth time someone has told me that. Not one of '
-                                    'them looked relieved.'},
-                        {   'speaker': 'Dockhand Moss',
-                            'text': 'The people who run this place have been told to pretend they '
-                                    'remember nothing.'},
-                        {   'speaker': 'Dockhand Moss',
-                            'text': 'Even if I told you what I saw, I doubt you would believe who '
-                                    'told me to stay silent.'},
-                        {   'speaker': 'Detective',
-                            'text': "I will decide what the evidence can support. I won't decide "
-                                    "before I've seen it."},
-                        {   'speaker': 'Sailor Bram',
-                            'text': "Then search the room. You may find the truth, but it won't "
-                                    'make this night easier.'}],
-        'suspect_speech': [   'You should have stayed away from Drowned Docks. People who dig '
-                              'beneath a family usually find graves.',
-                              "I won't pretend I cared about Courier Nash. But you don't know who "
-                              'truly wanted this done.',
-                              "The silver moth is not a symbol of loyalty. It's a reminder that "
-                              'someone can always see the light you stand in.',
-                              'Ask Evelyn why your case file already existed before the murder was '
-                              'reported.'],
-        'deduction_decoys': [   [   'The damage was an ordinary accident at Drowned Docks.',
-                                    'A stranger without access arrived after everyone left.'],
-                                [   'The witness mistook a harmless visitor for the suspect.',
-                                    'There is no reliable way to link the trace to any person.'],
-                                [   'The motive was a spontaneous argument unrelated to the '
-                                    'evidence.',
-                                    'The paperwork is genuine and the loss has no connection to the '
-                                    'death.']],
-        'journal_lore': [   'CASE 07 — THE DROWNED DOCKS',
-                            'Location of inquiry: Drowned Docks',
-                            'Deceased: Courier Nash',
-                            'Current testimony suggests the public story about the death is '
-                            'incomplete.',
-                            'A silver moth token appears in the evidence chain yet again.',
-                            'The Blackwell family seems linked to the scene through a person, a '
-                            'document, or a piece of land.',
-                            "The night guard's patrol changes whenever anyone raises an alarm.",
-                            'The witness seems afraid of a threat beyond the murderer in this room.',
-                            'A false conclusion here could conceal evidence needed to unlock the '
-                            'next case.',
-                            'Only properly supported deductions can form the final accusation.'],
-        'suspect_alias': 'Harbor Master Pike'},
-    {   'title': 'The Silent Observatory',
-        'place': 'Silent Observatory',
-        'victim': 'Astronomer Grey',
-        'culprit': 'Professor Crane',
-        'role': 'the observatory director',
-        'motive': 'to protect secret Lantern meetings hidden in plain sight',
-        'scene': 'observatory',
-        'threat': 'The dome turns like a gun turret over the city, and every metal footstep echoes '
-                  'into the dark.',
-        'intro': [   "Grey's final sky chart mapped no constellation at all.",
-                     'Instead, his telescope was locked toward the courthouse tower and his last '
-                     'journal entry listed guest initials, not stars.',
-                     'At the base of the instrument lies yet another silver moth, scratched with a '
-                     'courthouse seal.'],
-        'reveal': 'Crane confesses the observatory dome was used to shield meetings, but insists '
-                  'the real founder still moves inside the Blackwell family itself.',
-        'aftermath': 'Impressions in a guest book name a magistrate and reference sealed evidence '
-                     'in the old courthouse archive.',
-        'witness': 'Grey said he had found a star that could ruin men in broad daylight. Then he '
-                   'laughed and pointed at the courthouse.',
-        'clues': [   (   'Misaligned Star Chart',
-                         'The telescope angle matches the courthouse tower rather than a '
-                         'constellation.'),
-                     (   'Broken Dome Gear',
-                         'A damaged gear jammed the dome mechanism and blocked an exit.'),
-                     (   'Indented Guest Book',
-                         'Erased names still show through as impressions on the page.')],
-        'questions': [   (   'What was Grey truly observing?',
-                             'Misaligned Star Chart',
-                             'He was watching the courthouse tower, not the night sky.'),
-                         (   'How was escape prevented?',
-                             'Broken Dome Gear',
-                             'Someone jammed the dome with deliberate force.'),
-                         (   'Who attended the secret meeting?',
-                             'Indented Guest Book',
-                             'The erased impressions identify Lantern trustees and Magistrate '
-                             'Blythe.')],
-        'cinematic': [   'The telescope is pointed at the courthouse, but the dome is aligned with '
-                         'the moon.',
-                         "Grey's journal records people gathering at the tower as if they were "
-                         'celestial events.',
-                         'The observatory director has removed one gear and left its teeth lying on '
-                         'the floor.',
-                         'A cold circle on the desk shows where a flask once stood.',
-                         'Someone has marked the guest book with invisible pressure, not ink.',
-                         'The metal dome rotates. The exit moves behind you as the mechanism '
-                         'grinds.',
-                         "An old recording plays a man's voice reading out a trial verdict.",
-                         'Crane asks how many lives are worth preserving a single name.',
-                         "A brass moth is mounted inside the telescope's eyepiece cap.",
-                         'Your evidence points downward even as the telescope points toward the '
-                         'sky.',
-                         'The courthouse windows wink once in answer to a signal nobody sent.',
-                         'A second observer watches from the stairs. By the time you reach them, '
-                         'they are gone.'],
-        'supporting': ['Assistant Hester', 'Night Watcher'],
-        'room_name': 'Lower Dome',
-        'discovery_moments': [   'A small detail catches the light differently the second time you look.',
-                                 'You turn the item over slowly. Its meaning changes when you '
-                                 'remember what the witness said.',
-                                 'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
-        'dialogue': [   {   'speaker': 'Assistant Hester',
-                            'text': 'I knew Astronomer Grey. They were frightened in the days '
-                                    'before the murder. I keep thinking I should have said '
-                                    'something.'},
-                        {   'speaker': 'Detective',
-                            'text': 'Start from the last moment you saw them alive. Leave nothing '
-                                    'out, even what seems unimportant.'},
-                        {   'speaker': 'Assistant Hester',
-                            'text': 'Grey said he had found a star that could ruin men in broad '
-                                    'daylight. Then he laughed and pointed at the courthouse.'},
-                        {   'speaker': 'Detective',
-                            'text': 'And who else knew you would be here tonight?'},
-                        {   'speaker': 'Assistant Hester',
-                            'text': 'There was a message with a silver moth on the seal. I thought '
-                                    'it was a family emblem.'},
-                        {   'speaker': 'Detective',
-                            'text': 'This is the tenth time someone has told me that. Not one of '
-                                    'them looked relieved.'},
-                        {   'speaker': 'Night Watcher',
-                            'text': 'The people who run this place have been told to pretend they '
-                                    'remember nothing.'},
-                        {   'speaker': 'Night Watcher',
-                            'text': 'Even if I told you what I saw, I doubt you would believe who '
-                                    'told me to stay silent.'},
-                        {   'speaker': 'Detective',
-                            'text': "I will decide what the evidence can support. I won't decide "
-                                    "before I've seen it."},
-                        {   'speaker': 'Assistant Hester',
-                            'text': "Then search the room. You may find the truth, but it won't "
-                                    'make this night easier.'}],
-        'suspect_speech': [   'You should have stayed away from Silent Observatory. People who dig '
-                              'beneath a family usually find graves.',
-                              "I won't pretend I cared about Astronomer Grey. But you don't know "
-                              'who truly wanted this done.',
-                              "The silver moth is not a symbol of loyalty. It's a reminder that "
-                              'someone can always see the light you stand in.',
-                              'Ask Evelyn why your case file already existed before the murder was '
-                              'reported.'],
-        'deduction_decoys': [   [   'The damage was an ordinary accident at Silent Observatory.',
-                                    'A stranger without access arrived after everyone left.'],
-                                [   'The witness mistook a harmless visitor for the suspect.',
-                                    'There is no reliable way to link the trace to any person.'],
-                                [   'The motive was a spontaneous argument unrelated to the '
-                                    'evidence.',
-                                    'The paperwork is genuine and the loss has no connection to the '
-                                    'death.']],
-        'journal_lore': [   'CASE 08 — THE SILENT OBSERVATORY',
-                            'Location of inquiry: Silent Observatory',
-                            'Deceased: Astronomer Grey',
-                            'Current testimony suggests the public story about the death is '
-                            'incomplete.',
-                            'A silver moth token appears in the evidence chain yet again.',
-                            'The Blackwell family seems linked to the scene through a person, a '
-                            'document, or a piece of land.',
-                            "The night guard's patrol changes whenever anyone raises an alarm.",
-                            'The witness seems afraid of a threat beyond the murderer in this room.',
-                            'A false conclusion here could conceal evidence needed to unlock the '
-                            'next case.',
-                            'Only properly supported deductions can form the final accusation.'],
-        'suspect_alias': 'Professor Crane'},
-    {   'title': 'The Court of Ash',
-        'place': 'Old Courthouse',
-        'victim': 'Judge Harrow',
-        'culprit': 'Magistrate Blythe',
-        'role': 'a magistrate',
-        'motive': 'to bury the founding trial that protected the Lantern',
-        'scene': 'court',
-        'threat': 'The courthouse is all echoes and locked doors; once suspicion rises, every '
-                  'bailiff becomes a hunter.',
-        'intro': [   'Harrow reopened a case older than you are and died the night before the '
-                     'hearing.',
-                     'The archive vault is sealed from the inside, but soot marks show the fire '
-                     'began in a document tray, not the furnace.',
-                     "Tucked inside a law volume is the ninth moth token and the words: 'She was "
-                     "acquitted to found them all.'"],
-        'reveal': 'Blythe confesses to the murder and to replacing trial pages—yet she fears Lady '
-                  'Evelyn more than prison or death.',
-        'aftermath': 'The restored transcript names Evelyn Blackwell as the hidden architect. The '
-                     'moth tokens align into a map of the family crypt.',
-        'witness': 'The trial had two verdicts. Someone wanted history to remember the innocent one '
-                   'and bury the other in ash.',
-        'clues': [   (   'Replacement Transcript',
-                         'Several trial pages were substituted to hide a second verdict.'),
-                     (   'Authorization Stamp',
-                         "The replacement pages bear Blythe's archive authorization stamp."),
-                     (   'Dustless Passage',
-                         'A hidden corridor to the archives shows fresh footprints in otherwise '
-                         'settled dust.')],
-        'questions': [   (   'What did the original verdict reveal?',
-                             'Replacement Transcript',
-                             'The founder was cleared through fraud, not innocence.'),
-                         (   'Who inserted the false pages?',
-                             'Authorization Stamp',
-                             'Blythe authorized and installed the substitutions.'),
-                         (   'How was the sealed archive reached?',
-                             'Dustless Passage',
-                             'The killer used an unrecorded private corridor.')],
-        'cinematic': [   "Judge Harrow's office is immaculate. His trial notes are not.",
-                         'Every replaced transcript page contains the same faint printer error.',
-                         'A magistrate claims she has not entered the archive in years. Dust on her '
-                         'coat is from the archive ceiling.',
-                         'The courthouse clock rings one fewer time than it should.',
-                         "Harrow's last case file has your own initials penciled at the margin.",
-                         "A juror's statement ends mid-sentence and begins again in someone else's "
-                         'handwriting.',
-                         'Behind the bench, a narrow passage leads toward a sealed file room.',
-                         'Blythe has kept two verdicts under one case number.',
-                         'An old newspaper photograph shows Evelyn without looking one day younger '
-                         'than she does now.',
-                         "A moth-shaped keyhole appears on the underside of the judge's desk.",
-                         'You read the original verdict. The accused was the person who first hired '
-                         'you.',
-                         'The last token clicks into place. The floor plan leads back to the '
-                         'manor.'],
-        'supporting': ['Clerk Sloane', 'Bailiff Flint'],
-        'room_name': 'Sealed Records',
-        'discovery_moments': [   'A small detail catches the light differently the second time you look.',
-                                 'You turn the item over slowly. Its meaning changes when you '
-                                 'remember what the witness said.',
-                                 'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
-        'dialogue': [   {   'speaker': 'Clerk Sloane',
-                            'text': 'I knew Judge Harrow. They were frightened in the days before '
-                                    'the murder. I keep thinking I should have said something.'},
-                        {   'speaker': 'Detective',
-                            'text': 'Start from the last moment you saw them alive. Leave nothing '
-                                    'out, even what seems unimportant.'},
-                        {   'speaker': 'Clerk Sloane',
-                            'text': 'The trial had two verdicts. Someone wanted history to remember '
-                                    'the innocent one and bury the other in ash.'},
-                        {   'speaker': 'Detective',
-                            'text': 'And who else knew you would be here tonight?'},
-                        {   'speaker': 'Clerk Sloane',
-                            'text': 'There was a message with a silver moth on the seal. I thought '
-                                    'it was a family emblem.'},
-                        {   'speaker': 'Detective',
-                            'text': 'This is the tenth time someone has told me that. Not one of '
-                                    'them looked relieved.'},
-                        {   'speaker': 'Bailiff Flint',
-                            'text': 'The people who run this place have been told to pretend they '
-                                    'remember nothing.'},
-                        {   'speaker': 'Bailiff Flint',
-                            'text': 'Even if I told you what I saw, I doubt you would believe who '
-                                    'told me to stay silent.'},
-                        {   'speaker': 'Detective',
-                            'text': "I will decide what the evidence can support. I won't decide "
-                                    "before I've seen it."},
-                        {   'speaker': 'Clerk Sloane',
-                            'text': "Then search the room. You may find the truth, but it won't "
-                                    'make this night easier.'}],
-        'suspect_speech': [   'You should have stayed away from Old Courthouse. People who dig '
-                              'beneath a family usually find graves.',
-                              "I won't pretend I cared about Judge Harrow. But you don't know who "
-                              'truly wanted this done.',
-                              "The silver moth is not a symbol of loyalty. It's a reminder that "
-                              'someone can always see the light you stand in.',
-                              'Ask Evelyn why your case file already existed before the murder was '
-                              'reported.'],
-        'deduction_decoys': [   [   'The damage was an ordinary accident at Old Courthouse.',
-                                    'A stranger without access arrived after everyone left.'],
-                                [   'The witness mistook a harmless visitor for the suspect.',
-                                    'There is no reliable way to link the trace to any person.'],
-                                [   'The motive was a spontaneous argument unrelated to the '
-                                    'evidence.',
-                                    'The paperwork is genuine and the loss has no connection to the '
-                                    'death.']],
-        'journal_lore': [   'CASE 09 — THE COURT OF ASH',
-                            'Location of inquiry: Old Courthouse',
-                            'Deceased: Judge Harrow',
-                            'Current testimony suggests the public story about the death is '
-                            'incomplete.',
-                            'A silver moth token appears in the evidence chain yet again.',
-                            'The Blackwell family seems linked to the scene through a person, a '
-                            'document, or a piece of land.',
-                            "The night guard's patrol changes whenever anyone raises an alarm.",
-                            'The witness seems afraid of a threat beyond the murderer in this room.',
-                            'A false conclusion here could conceal evidence needed to unlock the '
-                            'next case.',
-                            'Only properly supported deductions can form the final accusation.'],
-        'suspect_alias': 'Magistrate Blythe'},
-    {   'title': 'The Last Lantern',
-        'place': 'Blackwell Crypt',
-        'victim': 'The final witness',
-        'culprit': 'Evelyn Blackwell',
-        'role': 'the hidden architect of the Lantern',
-        'motive': 'to preserve the family myth by controlling every witness and every record',
-        'scene': 'crypt',
-        'threat': 'The crypt is a maze of candles, stone, and family portraits; even victory feels '
-                  'like trespass.',
-        'intro': [   'The nine silver moths fit together into a floor plan beneath the Blackwell '
-                     'estate.',
-                     'Lady Evelyn has been at your shoulder since the first death—offering help, '
-                     'steering your attention, feeding your anger.',
-                     'Now the crypt opens, and your final witness lies dying beside a recorder '
-                     'addressed to you alone.'],
-        'reveal': 'Evelyn admits every chapter served her design: each murder pruned a threat to '
-                  'the Blackwell legend and drew you downward, one truth at a time.',
-        'aftermath': 'With Evelyn dead, the Lantern collapses. The records survive. So does the '
-                     'uneasy knowledge that she turned your own hunger for justice into her final '
-                     'weapon.',
-        'witness': 'She said the family had to remain a story, not a bloodline. Stories survive '
-                   'because somebody chooses what is remembered.',
-        'clues': [   ('Moth Map', "The nine moth tokens lock together into the crypt's floor plan."),
-                     (   "Founder's Portrait",
-                         'A concealed dedication names Evelyn as the surviving heir to the '
-                         'founder.'),
-                     (   'Final Confession',
-                         'A sealed recording links Evelyn to every prior killing and every order.')],
-        'questions': [   (   'What links all nine previous cases?',
-                             'Moth Map',
-                             'Each crime followed instructions embedded in the moth token network.'),
-                         (   'Who truly founded and preserved the Lantern?',
-                             "Founder's Portrait",
-                             'Evelyn Blackwell inherited and directed the society.'),
-                         (   'Who ordered the chain of murders?',
-                             'Final Confession',
-                             'The recording names Evelyn as the architect behind all ten '
-                             'chapters.')],
-        'cinematic': [   'The manor is quiet when you return. The storm ended days ago. The windows '
-                         'are still lit.',
-                         'Nine brass moths fit together like wings around a hollow center.',
-                         'The crypt opens beneath the family portrait that was moved on the first '
-                         'night.',
-                         'A recording addressed to you plays in the voice of someone you buried '
-                         'three chapters ago.',
-                         'Evelyn is waiting under a circle of candles. She has dressed for a '
-                         'funeral but wears no mourning black.',
-                         'The surviving witness tries to speak. Evelyn closes their eyes before '
-                         'they can say her name.',
-                         "Every murder removed someone who might have contradicted the family's "
-                         'official history.',
-                         'The ledger reveals Evelyn funded the investigation as carefully as she '
-                         'funded the killings.',
-                         'She says she needed a detective brave enough to do what the Lantern could '
-                         'no longer do.',
-                         'Your journal lies open on the altar, its pages rearranged into the '
-                         'chronology she wanted you to discover.',
-                         'The final confession is real. So are the lives that will never be '
-                         'returned.',
-                         'You have one decision left: end the person who shaped the mystery, or '
-                         'become part of her ending.'],
-        'supporting': ['Evelyn', 'The last witness'],
-        'room_name': 'Family Crypt',
-        'discovery_moments': [   'A small detail catches the light differently the second time you look.',
-                                 'You turn the item over slowly. Its meaning changes when you '
-                                 'remember what the witness said.',
-                                 'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
-        'dialogue': [   {   'speaker': 'Evelyn',
-                            'text': 'I knew The final witness. They were frightened in the days '
-                                    'before the murder. I keep thinking I should have said '
-                                    'something.'},
-                        {   'speaker': 'Detective',
-                            'text': 'Start from the last moment you saw them alive. Leave nothing '
-                                    'out, even what seems unimportant.'},
-                        {   'speaker': 'Evelyn',
-                            'text': 'She said the family had to remain a story, not a bloodline. '
-                                    'Stories survive because somebody chooses what is remembered.'},
-                        {   'speaker': 'Detective',
-                            'text': 'And who else knew you would be here tonight?'},
-                        {   'speaker': 'Evelyn',
-                            'text': 'There was a message with a silver moth on the seal. I thought '
-                                    'it was a family emblem.'},
-                        {   'speaker': 'Detective',
-                            'text': 'This is the tenth time someone has told me that. Not one of '
-                                    'them looked relieved.'},
-                        {   'speaker': 'The last witness',
-                            'text': 'The people who run this place have been told to pretend they '
-                                    'remember nothing.'},
-                        {   'speaker': 'The last witness',
-                            'text': 'Even if I told you what I saw, I doubt you would believe who '
-                                    'told me to stay silent.'},
-                        {   'speaker': 'Detective',
-                            'text': "I will decide what the evidence can support. I won't decide "
-                                    "before I've seen it."},
-                        {   'speaker': 'Evelyn',
-                            'text': "Then search the room. You may find the truth, but it won't "
-                                    'make this night easier.'}],
-        'suspect_speech': [   'You should have stayed away from Blackwell Crypt. People who dig '
-                              'beneath a family usually find graves.',
-                              "I won't pretend I cared about The final witness. But you don't know "
-                              'who truly wanted this done.',
-                              "The silver moth is not a symbol of loyalty. It's a reminder that "
-                              'someone can always see the light you stand in.',
-                              'Ask Evelyn why your case file already existed before the murder was '
-                              'reported.'],
-        'deduction_decoys': [   [   'The damage was an ordinary accident at Blackwell Crypt.',
-                                    'A stranger without access arrived after everyone left.'],
-                                [   'The witness mistook a harmless visitor for the suspect.',
-                                    'There is no reliable way to link the trace to any person.'],
-                                [   'The motive was a spontaneous argument unrelated to the '
-                                    'evidence.',
-                                    'The paperwork is genuine and the loss has no connection to the '
-                                    'death.']],
-        'journal_lore': [   'CASE 10 — THE LAST LANTERN',
-                            'Location of inquiry: Blackwell Crypt',
-                            'Deceased: The final witness',
-                            'Current testimony suggests the public story about the death is '
-                            'incomplete.',
-                            'A silver moth token appears in the evidence chain yet again.',
-                            'The Blackwell family seems linked to the scene through a person, a '
-                            'document, or a piece of land.',
-                            "The night guard's patrol changes whenever anyone raises an alarm.",
-                            'The witness seems afraid of a threat beyond the murderer in this room.',
-                            'A false conclusion here could conceal evidence needed to unlock the '
-                            'next case.',
-                            'Only properly supported deductions can form the final accusation.'],
-        'suspect_alias': 'Evelyn Blackwell'}]
+# TEN CHAPTERS / THIRTY DISTINCT REASONING TECHNIQUES
+METHODS = [('Chronology', 'Compare timestamps to expose a false timeline.'),
+           ('Contradiction', 'Find two claims that cannot both be true.'),
+           ('Trace analysis', 'Connect a physical trace to its source.'),
+           ('Alibi testing', "Cross-check a suspect's stated location."),
+           ('Document authentication', 'Identify a forged or altered document.'),
+           ('Motive mapping', 'Follow who benefits from the crime.'),
+           ('Spatial inference', 'Infer movement from room layout.'),
+           ('Witness triangulation', 'Reconcile conflicting eyewitness accounts.'),
+           ('Cipher breaking', 'Decode a concealed message.'),
+           ('Opportunity analysis', 'Establish access at the critical moment.'),
+           ('Pattern recognition', 'Spot a repeated signature across incidents.'),
+           ('Forensic comparison', 'Compare marks left by objects or tools.'),
+           ('Negative evidence', 'Reason from something conspicuously absent.'),
+           ('Behavioral profiling', 'Compare conduct to known habits.'),
+           ('Ledger reconciliation', 'Find a financial discrepancy.'),
+           ('Route reconstruction', "Rebuild a suspect's path."),
+           ('Sound localization', 'Locate a sound through testimony.'),
+           ('Material identification', 'Recognize a rare substance or fabric.'),
+           ('Chain of custody', 'Track who handled an item.'),
+           ('Codebook inference', 'Derive meaning from a recurring symbol.'),
+           ('Probability elimination', 'Discard incompatible explanations.'),
+           ('Security bypass analysis', 'Determine how safeguards failed.'),
+           ('Testimony sequencing', 'Put recollections into proper order.'),
+           ('Network analysis', 'Expose hidden associations between people.'),
+           ('Chemical residue', 'Interpret safe, non-actionable lab residue.'),
+           ('Handwriting comparison', 'Match distinctive letter forms.'),
+           ('Mechanical reconstruction', 'Infer how a mechanism was manipulated.'),
+           ('Identity verification', 'Compare claimed identity against records.'),
+           ('Deception detection', 'Recognize a deliberately staged scene.'),
+           ('Synthesis', 'Unite separate cases into one theory.')]
+
+CHAPTERS = [{'title': 'The Manor',
+             'place': 'Blackwell Manor',
+             'victim': 'Albert Blackwell',
+             'culprit': 'Mr. Collins',
+             'role': 'the estate steward',
+             'motive': 'his fear that Albert had discovered years of theft',
+             'scene': 'manor',
+             'threat': 'A storm batters the estate while someone inside keeps extinguishing lamps one by '
+                       'one.',
+             'intro': ['The Blackwell family has money, enemies, and a talent for silence.',
+                       'Tonight the patriarch Albert Blackwell lies dead in his study while thunder '
+                       'drowns every scream.',
+                       'A woman calling herself Lady Evelyn presses a silver moth token into your '
+                       "hand and whispers: 'Do not trust the clocks.'"],
+             'reveal': 'Collins breaks when cornered. He admits the killing, but swears he was only the '
+                       'first hand used by a hidden patron.',
+             'aftermath': 'Inside his coat you find another silver moth and a ledger page naming a '
+                          'midnight delivery at Ashcroft Station.',
+             'witness': 'I heard the study door open long after the grandfather clock stopped. Someone '
+                        'wanted us all staring at the wrong hour.',
+             'clues': [('Broken Clock',
+                        'The study clock froze at 9:30, but the mainspring was deliberately '
+                        'jammed.'),
+                       ('Crescent Footprints',
+                        'Wet prints from the garden entrance show a crescent heel gouge.'),
+                       ('Burned Trust Letter',
+                        'A half-burned notice demands missing trust funds be restored before '
+                        'dawn.')],
+             'questions': [('Was the clock an honest timestamp?',
+                            'Broken Clock',
+                            'No. The clock was staged to create a false time of death.'),
+                           ('Who entered through the garden?',
+                            'Crescent Footprints',
+                            "Collins's boots share the same crescent-cut heel."),
+                           ('Why was Albert silenced?',
+                            'Burned Trust Letter',
+                            "Albert was about to expose Collins's embezzlement.")],
+             'cinematic': ['I knew Albert Blackwell before I knew how to tell a convincing lie. He '
+                           'had three fears. Thunder was not one of them.',
+                           'The power fails. A gunshot is reported by the maid, but the body bears no '
+                           'gunshot wound.',
+                           'The family portrait above the stairs has been moved by half an inch. A '
+                           'space is visible where a second portrait once hung.',
+                           'Evelyn arrives before the constables. She has no umbrella and not a drop '
+                           'of rain on her coat.',
+                           "A whisper slips beneath the study door: 'He kept two ledgers. One for his "
+                           "friends, one for his family.'",
+                           'You find the broken clock, still ticking inside despite the hands being '
+                           'stopped at half past nine.',
+                           'A house full of people might have heard a scream. Every one of them '
+                           'claims to have heard the storm instead.',
+                           'Collins does not deny entering the study. He denies knowing what time it '
+                           'was, then quotes the stopped clock exactly.',
+                           'The first silver moth is cold in your hand. Its wings fit a notch carved '
+                           'into the study desk.',
+                           'An unsigned letter ends with three words: KEEP THEM QUIET.',
+                           'Lady Evelyn asks whether you believe the dead deserve justice, or merely '
+                           'a better story.',
+                           'When you confront Collins, his first question is not whether you have '
+                           'evidence. It is whether Evelyn is nearby.'],
+             'supporting': ['Margot', 'Edmund'],
+             'room_name': 'West Gallery',
+             'discovery_moments': ['A small detail catches the light differently the second time you look.',
+                                   'You turn the item over slowly. Its meaning changes when you '
+                                   'remember what the witness said.',
+                                   'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
+             'dialogue': [{'speaker': 'Margot',
+                           'text': 'I knew Albert Blackwell. They were frightened in the days '
+                                   'before the murder. I keep thinking I should have said '
+                                   'something.'},
+                          {'speaker': 'Detective',
+                           'text': 'Start from the last moment you saw them alive. Leave nothing '
+                                   'out, even what seems unimportant.'},
+                          {'speaker': 'Margot',
+                           'text': 'I heard the study door open long after the grandfather clock '
+                                   'stopped. Someone wanted us all staring at the wrong hour.'},
+                          {'speaker': 'Detective',
+                           'text': 'And who else knew you would be here tonight?'},
+                          {'speaker': 'Margot',
+                           'text': 'There was a message with a silver moth on the seal. I thought '
+                                   'it was a family emblem.'},
+                          {'speaker': 'Detective',
+                           'text': 'This is the tenth time someone has told me that. Not one of '
+                                   'them looked relieved.'},
+                          {'speaker': 'Edmund',
+                           'text': 'The people who run this place have been told to pretend they '
+                                   'remember nothing.'},
+                          {'speaker': 'Edmund',
+                           'text': 'Even if I told you what I saw, I doubt you would believe who '
+                                   'told me to stay silent.'},
+                          {'speaker': 'Detective',
+                           'text': "I will decide what the evidence can support. I won't decide "
+                                   "before I've seen it."},
+                          {'speaker': 'Margot',
+                           'text': "Then search the room. You may find the truth, but it won't "
+                                   'make this night easier.'}],
+             'suspect_speech': ['You should have stayed away from Blackwell Manor. People who dig '
+                                'beneath a family usually find graves.',
+                                "I won't pretend I cared about Albert Blackwell. But you don't know "
+                                'who truly wanted this done.',
+                                "The silver moth is not a symbol of loyalty. It's a reminder that "
+                                'someone can always see the light you stand in.',
+                                'Ask Evelyn why your case file already existed before the murder was '
+                                'reported.'],
+             'deduction_decoys': [['The damage was an ordinary accident at Blackwell Manor.',
+                                   'A stranger without access arrived after everyone left.'],
+                                  ['The witness mistook a harmless visitor for the suspect.',
+                                   'There is no reliable way to link the trace to any person.'],
+                                  ['The motive was a spontaneous argument unrelated to the '
+                                   'evidence.',
+                                   'The paperwork is genuine and the loss has no connection to the '
+                                   'death.']],
+             'journal_lore': ['CASE 01 — THE MANOR',
+                              'Location of inquiry: Blackwell Manor',
+                              'Deceased: Albert Blackwell',
+                              'Current testimony suggests the public story about the death is '
+                              'incomplete.',
+                              'A silver moth token appears in the evidence chain yet again.',
+                              'The Blackwell family seems linked to the scene through a person, a '
+                              'document, or a piece of land.',
+                              "The night guard's patrol changes whenever anyone raises an alarm.",
+                              'The witness seems afraid of a threat beyond the murderer in this room.',
+                              'A false conclusion here could conceal evidence needed to unlock the '
+                              'next case.',
+                              'Only properly supported deductions can form the final accusation.'],
+             'suspect_alias': 'Mr. Collins'},
+            {'title': 'The Midnight Train',
+             'place': 'Ashcroft Station',
+             'victim': 'Conductor Vale',
+             'culprit': 'Ada Mercer',
+             'role': 'a railway clerk',
+             'motive': 'to recover a passenger manifest tied to the Lantern network',
+             'scene': 'train',
+             'threat': 'Fog, steam, and the crush of travelers make it easy for someone to vanish '
+                       'between carriages.',
+             'intro': ['The station master swears the train never stopped, yet a body disappeared all '
+                       'the same.',
+                       "Conductor Vale's lantern was found swinging from an empty caboose and a "
+                       "ticket was punched for a station that hasn't existed in thirty years.",
+                       "In Collins's pocket ledger, Ashcroft Station was circled twice in red ink."],
+             'reveal': 'Ada confesses she strangled Vale for the manifest, but claims the names on it '
+                       'frightened her more than the murder itself.',
+             'aftermath': "The manifest includes a physician from the Hollow Hotel and a note: 'Room 13 "
+                          "must remain sealed.'",
+             'witness': 'The woman in the blue coat stepped off after the bell, not before it. She '
+                        'walked like she already knew no one would stop her.',
+             'clues': [('Obsolete Punch Mark',
+                        "The ticket was punched by a retired station tool kept in the clerk's "
+                        'office.'),
+                       ("Porter's Statement",
+                        'A porter saw a woman in a blue coat leave after final departure.'),
+                       ('Forged Shift Roster',
+                        "Ada's shift log was written with fresh ink over dried columns.")],
+             'questions': [('Could the ticket have been punched on the train?',
+                            'Obsolete Punch Mark',
+                            'No. It came from a retired punch only Ada could access.'),
+                           ('Who was seen leaving the carriage?',
+                            "Porter's Statement",
+                            'The porter identified Ada by her distinctive blue coat.'),
+                           ("Does Ada's alibi survive scrutiny?",
+                            'Forged Shift Roster',
+                            'No. The roster was altered after the train had departed.')],
+             'cinematic': ['The last train to Ashcroft is delayed by a signal nobody admits sending.',
+                           'Every passenger remembers a different conductor. Only the ticket stubs '
+                           'agree on his name.',
+                           "A child's toy clock ticks inside the empty compartment; its hands have no "
+                           'face.',
+                           'A whistle cuts through the fog, long after the rails should be silent.',
+                           'A woman in blue moves against the flow of passengers, carefully avoiding '
+                           'the station lamps.',
+                           "The punch mark is shaped like a moth's split wing. Its ink is older than "
+                           'the ticket.',
+                           'The porter insists he saw Ada. He refuses to say who ordered him to keep '
+                           'quiet.',
+                           'A manifest lists three passengers under names belonging to people buried '
+                           'years ago.',
+                           'Your own name appears in the luggage registry with the wrong date of '
+                           'birth.',
+                           'Behind the station wall, someone has scratched: THE TRACKS ONLY RUN IN '
+                           'ONE DIRECTION.',
+                           'Ada asks if a list of names can be a weapon. She does not wait for your '
+                           'answer.',
+                           'A train passes without stopping. In every window is a face you think you '
+                           'recognize.'],
+             'supporting': ['Porter Finch', 'Station Guard'],
+             'room_name': 'Platform Nine',
+             'discovery_moments': ['A small detail catches the light differently the second time you look.',
+                                   'You turn the item over slowly. Its meaning changes when you '
+                                   'remember what the witness said.',
+                                   'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
+             'dialogue': [{'speaker': 'Porter Finch',
+                           'text': 'I knew Conductor Vale. They were frightened in the days before '
+                                   'the murder. I keep thinking I should have said something.'},
+                          {'speaker': 'Detective',
+                           'text': 'Start from the last moment you saw them alive. Leave nothing '
+                                   'out, even what seems unimportant.'},
+                          {'speaker': 'Porter Finch',
+                           'text': 'The woman in the blue coat stepped off after the bell, not '
+                                   'before it. She walked like she already knew no one would stop '
+                                   'her.'},
+                          {'speaker': 'Detective',
+                           'text': 'And who else knew you would be here tonight?'},
+                          {'speaker': 'Porter Finch',
+                           'text': 'There was a message with a silver moth on the seal. I thought '
+                                   'it was a family emblem.'},
+                          {'speaker': 'Detective',
+                           'text': 'This is the tenth time someone has told me that. Not one of '
+                                   'them looked relieved.'},
+                          {'speaker': 'Station Guard',
+                           'text': 'The people who run this place have been told to pretend they '
+                                   'remember nothing.'},
+                          {'speaker': 'Station Guard',
+                           'text': 'Even if I told you what I saw, I doubt you would believe who '
+                                   'told me to stay silent.'},
+                          {'speaker': 'Detective',
+                           'text': "I will decide what the evidence can support. I won't decide "
+                                   "before I've seen it."},
+                          {'speaker': 'Porter Finch',
+                           'text': "Then search the room. You may find the truth, but it won't "
+                                   'make this night easier.'}],
+             'suspect_speech': ['You should have stayed away from Ashcroft Station. People who dig '
+                                'beneath a family usually find graves.',
+                                "I won't pretend I cared about Conductor Vale. But you don't know who "
+                                'truly wanted this done.',
+                                "The silver moth is not a symbol of loyalty. It's a reminder that "
+                                'someone can always see the light you stand in.',
+                                'Ask Evelyn why your case file already existed before the murder was '
+                                'reported.'],
+             'deduction_decoys': [['The damage was an ordinary accident at Ashcroft Station.',
+                                   'A stranger without access arrived after everyone left.'],
+                                  ['The witness mistook a harmless visitor for the suspect.',
+                                   'There is no reliable way to link the trace to any person.'],
+                                  ['The motive was a spontaneous argument unrelated to the '
+                                   'evidence.',
+                                   'The paperwork is genuine and the loss has no connection to the '
+                                   'death.']],
+             'journal_lore': ['CASE 02 — THE MIDNIGHT TRAIN',
+                              'Location of inquiry: Ashcroft Station',
+                              'Deceased: Conductor Vale',
+                              'Current testimony suggests the public story about the death is '
+                              'incomplete.',
+                              'A silver moth token appears in the evidence chain yet again.',
+                              'The Blackwell family seems linked to the scene through a person, a '
+                              'document, or a piece of land.',
+                              "The night guard's patrol changes whenever anyone raises an alarm.",
+                              'The witness seems afraid of a threat beyond the murderer in this room.',
+                              'A false conclusion here could conceal evidence needed to unlock the '
+                              'next case.',
+                              'Only properly supported deductions can form the final accusation.'],
+             'suspect_alias': 'Ada Mercer'},
+            {'title': 'The Hollow Hotel',
+             'place': 'Hollow Hotel',
+             'victim': 'Guest Rowan',
+             'culprit': 'Dr. Fenwick',
+             'role': 'the resident physician',
+             'motive': 'to conceal brutal experiments financed by the Lantern',
+             'scene': 'hotel',
+             'threat': 'Every corridor looks identical, every bell seems to ring from nowhere, and Room '
+                       '13 feels occupied even when empty.',
+             'intro': ['At the Hollow Hotel, curtains remain drawn at noon and no guest asks for '
+                       'fresh towels twice.',
+                       'Rowan, a guest who requested police protection, is gone from a room bolted '
+                       'from within.',
+                       "Under the bed, you find the next silver moth and the words: 'A doctor can "
+                       "turn fear into obedience.'"],
+             'reveal': 'Fenwick collapses under questioning and points toward a recording stolen at the '
+                       'Gilded Theater—evidence he says could destroy the entire order.',
+             'aftermath': 'You recover a coded patient ledger and the reel number of a film hidden in '
+                          'the theater district.',
+             'witness': 'The bell rang from the hall after Rowan disappeared. I know because I had '
+                        'already collected the supper tray.',
+             'clues': [('Duplicate Key Wax',
+                        'Wax impressions inside the lock preserve the outline of a second key.'),
+                       ('False Medical Bill',
+                        'A hidden account lists treatments Rowan never authorized.'),
+                       ('Bell Log',
+                        'The service bell rang after Rowan should already have been dead.')],
+             'questions': [('How was the locked room illusion created?',
+                            'Duplicate Key Wax',
+                            'A duplicate key allowed Fenwick to enter and re-lock the room.'),
+                           ('What was Fenwick hiding?',
+                            'False Medical Bill',
+                            'The bill concealed unauthorized treatments and extortion.'),
+                           ("Who faked the victim's final timeline?",
+                            'Bell Log',
+                            'Fenwick rang the service bell from the hall after the murder.')],
+             'cinematic': ['Room thirteen has been rented every Tuesday for nineteen years. The '
+                           'signatures are identical.',
+                           'The concierge refuses to call the missing guest by their name.',
+                           'A second key clinks in the ice bucket, though the ice has melted hours '
+                           'ago.',
+                           'The corridor mirror reflects a lamp that was extinguished yesterday.',
+                           'One guest remembers a scream. Another remembers a lullaby.',
+                           'In the basement an examination table lies beneath a sheet too clean for '
+                           'the room.',
+                           'The medical bills name treatments nobody remembers receiving.',
+                           "The physician's handwriting changes halfway through his notebook.",
+                           'Room thirteen smells faintly of burnt sugar and something chemical.',
+                           'Rowan sent a letter to Evelyn two days before the murder. Evelyn never '
+                           'mentioned it.',
+                           'A sealed envelope contains the single word: THEATER.',
+                           'Someone has been listening at the walls. The service bell rings once, '
+                           'then once more.'],
+             'supporting': ['Concierge Hale', 'Bellhop Owen'],
+             'room_name': 'East Corridor',
+             'discovery_moments': ['A small detail catches the light differently the second time you look.',
+                                   'You turn the item over slowly. Its meaning changes when you '
+                                   'remember what the witness said.',
+                                   'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
+             'dialogue': [{'speaker': 'Concierge Hale',
+                           'text': 'I knew Guest Rowan. They were frightened in the days before '
+                                   'the murder. I keep thinking I should have said something.'},
+                          {'speaker': 'Detective',
+                           'text': 'Start from the last moment you saw them alive. Leave nothing '
+                                   'out, even what seems unimportant.'},
+                          {'speaker': 'Concierge Hale',
+                           'text': 'The bell rang from the hall after Rowan disappeared. I know '
+                                   'because I had already collected the supper tray.'},
+                          {'speaker': 'Detective',
+                           'text': 'And who else knew you would be here tonight?'},
+                          {'speaker': 'Concierge Hale',
+                           'text': 'There was a message with a silver moth on the seal. I thought '
+                                   'it was a family emblem.'},
+                          {'speaker': 'Detective',
+                           'text': 'This is the tenth time someone has told me that. Not one of '
+                                   'them looked relieved.'},
+                          {'speaker': 'Bellhop Owen',
+                           'text': 'The people who run this place have been told to pretend they '
+                                   'remember nothing.'},
+                          {'speaker': 'Bellhop Owen',
+                           'text': 'Even if I told you what I saw, I doubt you would believe who '
+                                   'told me to stay silent.'},
+                          {'speaker': 'Detective',
+                           'text': "I will decide what the evidence can support. I won't decide "
+                                   "before I've seen it."},
+                          {'speaker': 'Concierge Hale',
+                           'text': "Then search the room. You may find the truth, but it won't "
+                                   'make this night easier.'}],
+             'suspect_speech': ['You should have stayed away from Hollow Hotel. People who dig '
+                                'beneath a family usually find graves.',
+                                "I won't pretend I cared about Guest Rowan. But you don't know who "
+                                'truly wanted this done.',
+                                "The silver moth is not a symbol of loyalty. It's a reminder that "
+                                'someone can always see the light you stand in.',
+                                'Ask Evelyn why your case file already existed before the murder was '
+                                'reported.'],
+             'deduction_decoys': [['The damage was an ordinary accident at Hollow Hotel.',
+                                   'A stranger without access arrived after everyone left.'],
+                                  ['The witness mistook a harmless visitor for the suspect.',
+                                   'There is no reliable way to link the trace to any person.'],
+                                  ['The motive was a spontaneous argument unrelated to the '
+                                   'evidence.',
+                                   'The paperwork is genuine and the loss has no connection to the '
+                                   'death.']],
+             'journal_lore': ['CASE 03 — THE HOLLOW HOTEL',
+                              'Location of inquiry: Hollow Hotel',
+                              'Deceased: Guest Rowan',
+                              'Current testimony suggests the public story about the death is '
+                              'incomplete.',
+                              'A silver moth token appears in the evidence chain yet again.',
+                              'The Blackwell family seems linked to the scene through a person, a '
+                              'document, or a piece of land.',
+                              "The night guard's patrol changes whenever anyone raises an alarm.",
+                              'The witness seems afraid of a threat beyond the murderer in this room.',
+                              'A false conclusion here could conceal evidence needed to unlock the '
+                              'next case.',
+                              'Only properly supported deductions can form the final accusation.'],
+             'suspect_alias': 'Dr. Fenwick'},
+            {'title': 'The Gilded Theater',
+             'place': 'Gilded Theater',
+             'victim': 'Singer Celeste',
+             'culprit': 'Victor Rook',
+             'role': 'the stage manager',
+             'motive': 'to suppress a recording naming Lantern trustees',
+             'scene': 'theater',
+             'threat': 'Crowds applaud while somebody backstage prepares another death behind velvet '
+                       'curtains.',
+             'intro': ['Theater folk lie with style, but their props usually tell the truth.',
+                       "Celeste dies during a blackout timed to the final bow, and the night's master "
+                       'reel vanishes with her final note.',
+                       'In the wings you find another moth token pinned beneath a cue sheet.'],
+             'reveal': 'Rook admits engineering the blackout and says the missing reel names the people '
+                       'who funded every death so far.',
+             'aftermath': 'Taped beneath the empty canister is a list of trustees and a registry code '
+                          'tied to the Old Quarter archives.',
+             'witness': "The stage went dark a breath too early. Only the manager's cue sheet ever "
+                        'leaves no room for improvisation.',
+             'clues': [('Blackout Cue',
+                        "An additional blackout note was penciled into the manager's master cue "
+                        'sheet.'),
+                       ('Velvet Fiber',
+                        "Red velvet threads from Rook's sleeve cling to the trapdoor latch."),
+                       ('Hollow Film Canister',
+                        'The canister is empty, but a hidden list of names is taped underneath '
+                        'it.')],
+             'questions': [('Who controlled the blackout?',
+                            'Blackout Cue',
+                            'Rook inserted the unauthorized lighting cue himself.'),
+                           ('Who reached the trapdoor?',
+                            'Velvet Fiber',
+                            "The trapdoor snagged fibers from Rook's jacket sleeve."),
+                           ('Why was Celeste killed?',
+                            'Hollow Film Canister',
+                            'She had evidence naming Lantern trustees on the stolen reel.')],
+             'cinematic': ['The applause goes on after the lights cut out, as if the audience cannot '
+                           'bear to hear silence.',
+                           "Celeste's final line was changed on the night of her death. Her "
+                           'understudy cannot say who changed it.',
+                           'The stage manager carries two cue sheets. One contains a blackout nobody '
+                           'rehearsed.',
+                           'A red velvet thread catches on a brass latch beneath the boards.',
+                           'Backstage, a phonograph plays a voice repeating a list of surnames.',
+                           'The projectionist says someone swapped reels during the third act.',
+                           "A torn ticket in the wings bears the crest of the city's oldest court.",
+                           'The director calls it an accident. He is smiling when he says it.',
+                           'A masked performer follows you between the curtains, then vanishes into '
+                           'the wings.',
+                           'The hidden list in the canister contains one family name twice.',
+                           'Evelyn appears in a private balcony reserved for empty seats.',
+                           'The house lights rise. No one has the courage to applaud.'],
+             'supporting': ['Understudy Rose', 'Projectionist Lin'],
+             'room_name': 'Stage Wings',
+             'discovery_moments': ['A small detail catches the light differently the second time you look.',
+                                   'You turn the item over slowly. Its meaning changes when you '
+                                   'remember what the witness said.',
+                                   'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
+             'dialogue': [{'speaker': 'Understudy Rose',
+                           'text': 'I knew Singer Celeste. They were frightened in the days before '
+                                   'the murder. I keep thinking I should have said something.'},
+                          {'speaker': 'Detective',
+                           'text': 'Start from the last moment you saw them alive. Leave nothing '
+                                   'out, even what seems unimportant.'},
+                          {'speaker': 'Understudy Rose',
+                           'text': "The stage went dark a breath too early. Only the manager's cue "
+                                   'sheet ever leaves no room for improvisation.'},
+                          {'speaker': 'Detective',
+                           'text': 'And who else knew you would be here tonight?'},
+                          {'speaker': 'Understudy Rose',
+                           'text': 'There was a message with a silver moth on the seal. I thought '
+                                   'it was a family emblem.'},
+                          {'speaker': 'Detective',
+                           'text': 'This is the tenth time someone has told me that. Not one of '
+                                   'them looked relieved.'},
+                          {'speaker': 'Projectionist Lin',
+                           'text': 'The people who run this place have been told to pretend they '
+                                   'remember nothing.'},
+                          {'speaker': 'Projectionist Lin',
+                           'text': 'Even if I told you what I saw, I doubt you would believe who '
+                                   'told me to stay silent.'},
+                          {'speaker': 'Detective',
+                           'text': "I will decide what the evidence can support. I won't decide "
+                                   "before I've seen it."},
+                          {'speaker': 'Understudy Rose',
+                           'text': "Then search the room. You may find the truth, but it won't "
+                                   'make this night easier.'}],
+             'suspect_speech': ['You should have stayed away from Gilded Theater. People who dig '
+                                'beneath a family usually find graves.',
+                                "I won't pretend I cared about Singer Celeste. But you don't know who "
+                                'truly wanted this done.',
+                                "The silver moth is not a symbol of loyalty. It's a reminder that "
+                                'someone can always see the light you stand in.',
+                                'Ask Evelyn why your case file already existed before the murder was '
+                                'reported.'],
+             'deduction_decoys': [['The damage was an ordinary accident at Gilded Theater.',
+                                   'A stranger without access arrived after everyone left.'],
+                                  ['The witness mistook a harmless visitor for the suspect.',
+                                   'There is no reliable way to link the trace to any person.'],
+                                  ['The motive was a spontaneous argument unrelated to the '
+                                   'evidence.',
+                                   'The paperwork is genuine and the loss has no connection to the '
+                                   'death.']],
+             'journal_lore': ['CASE 04 — THE GILDED THEATER',
+                              'Location of inquiry: Gilded Theater',
+                              'Deceased: Singer Celeste',
+                              'Current testimony suggests the public story about the death is '
+                              'incomplete.',
+                              'A silver moth token appears in the evidence chain yet again.',
+                              'The Blackwell family seems linked to the scene through a person, a '
+                              'document, or a piece of land.',
+                              "The night guard's patrol changes whenever anyone raises an alarm.",
+                              'The witness seems afraid of a threat beyond the murderer in this room.',
+                              'A false conclusion here could conceal evidence needed to unlock the '
+                              'next case.',
+                              'Only properly supported deductions can form the final accusation.'],
+             'suspect_alias': 'Victor Rook'},
+            {'title': 'The Old Quarter',
+             'place': 'Old Quarter Archives',
+             'victim': 'Archivist Bell',
+             'culprit': 'Nora Voss',
+             'role': 'the city registrar',
+             'motive': 'to erase the true Blackwell bloodline from public record',
+             'scene': 'quarter',
+             'threat': 'Firelight and ash hide a second crime scene among alleys that seem to rearrange '
+                       'themselves.',
+             'intro': ['When records burn, somebody profits from forgetting.',
+                       'A controlled blaze destroys one wall of the municipal archive, yet the flames '
+                       'somehow spared a single family register.',
+                       "Bell dies clutching a scrap of genealogy and the phrase: 'The first branch "
+                       "was cut on purpose.'"],
+             'reveal': 'Voss swears she erased the line because it pointed to a woman who built the '
+                       'Lantern long before the murders began.',
+             'aftermath': 'The surviving branch leads to a Blackwell matriarch and to a conservatory '
+                          'donor named Silas Wren.',
+             'witness': 'Only those pages burned. The rest of the room smoked, but the Blackwell indexes '
+                        'vanished like they had been selected first.',
+             'clues': [('Charred Register',
+                        'The destroyed pages all indexed Blackwell family births and marriages.'),
+                       ('Private Seal Fragment',
+                        "A wax seal from a private registrar's signet was left near the ash pan."),
+                       ('Arcade Sketch',
+                        'A witness drew the escape route through the market arcade to a '
+                        "registrar's side entrance.")],
+             'questions': [('Which records were actually targeted?',
+                            'Charred Register',
+                            'The fire focused on the Blackwell lineage pages.'),
+                           ('Who authorized their destruction?',
+                            'Private Seal Fragment',
+                            "The seal belongs to Nora Voss's private signet."),
+                           ('How did the culprit escape unseen?',
+                            'Arcade Sketch',
+                            "The sketch traces directly back to Voss's office entrance.")],
+             'cinematic': ['The archive is burning, but the fire follows the shelves like it can '
+                           'read.',
+                           "A registrar's seal rolls across the ash and comes to rest at your shoe.",
+                           'Archivist Bell left a scrap showing a marriage entered twice under two '
+                           'different names.',
+                           'A door to the arcade was locked from the outside, then opened with a key '
+                           'from within.',
+                           'The smoke hides a silhouette on the mezzanine, motionless and watching.',
+                           "The city historian will not speak until the mayor's carriage leaves.",
+                           'Old portraits show a Blackwell child who is absent from the family tree.',
+                           'A witness sketches the alley from memory, including a shutter painted '
+                           'shut years ago.',
+                           'Nora Voss keeps a ledger of every name she has erased.',
+                           'For the first time, you wonder whether Albert was ever the head of his '
+                           'own house.',
+                           'A scorched page contains a family motto: WHAT IS UNWRITTEN CANNOT DIE.',
+                           'A bell rings twelve times from a tower that has no working clock.'],
+             'supporting': ['Mrs. Alder', 'Watchman Fox'],
+             'room_name': 'Archive Gallery',
+             'discovery_moments': ['A small detail catches the light differently the second time you look.',
+                                   'You turn the item over slowly. Its meaning changes when you '
+                                   'remember what the witness said.',
+                                   'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
+             'dialogue': [{'speaker': 'Mrs. Alder',
+                           'text': 'I knew Archivist Bell. They were frightened in the days before '
+                                   'the murder. I keep thinking I should have said something.'},
+                          {'speaker': 'Detective',
+                           'text': 'Start from the last moment you saw them alive. Leave nothing '
+                                   'out, even what seems unimportant.'},
+                          {'speaker': 'Mrs. Alder',
+                           'text': 'Only those pages burned. The rest of the room smoked, but the '
+                                   'Blackwell indexes vanished like they had been selected first.'},
+                          {'speaker': 'Detective',
+                           'text': 'And who else knew you would be here tonight?'},
+                          {'speaker': 'Mrs. Alder',
+                           'text': 'There was a message with a silver moth on the seal. I thought '
+                                   'it was a family emblem.'},
+                          {'speaker': 'Detective',
+                           'text': 'This is the tenth time someone has told me that. Not one of '
+                                   'them looked relieved.'},
+                          {'speaker': 'Watchman Fox',
+                           'text': 'The people who run this place have been told to pretend they '
+                                   'remember nothing.'},
+                          {'speaker': 'Watchman Fox',
+                           'text': 'Even if I told you what I saw, I doubt you would believe who '
+                                   'told me to stay silent.'},
+                          {'speaker': 'Detective',
+                           'text': "I will decide what the evidence can support. I won't decide "
+                                   "before I've seen it."},
+                          {'speaker': 'Mrs. Alder',
+                           'text': "Then search the room. You may find the truth, but it won't "
+                                   'make this night easier.'}],
+             'suspect_speech': ['You should have stayed away from Old Quarter Archives. People who '
+                                'dig beneath a family usually find graves.',
+                                "I won't pretend I cared about Archivist Bell. But you don't know who "
+                                'truly wanted this done.',
+                                "The silver moth is not a symbol of loyalty. It's a reminder that "
+                                'someone can always see the light you stand in.',
+                                'Ask Evelyn why your case file already existed before the murder was '
+                                'reported.'],
+             'deduction_decoys': [['The damage was an ordinary accident at Old Quarter Archives.',
+                                   'A stranger without access arrived after everyone left.'],
+                                  ['The witness mistook a harmless visitor for the suspect.',
+                                   'There is no reliable way to link the trace to any person.'],
+                                  ['The motive was a spontaneous argument unrelated to the '
+                                   'evidence.',
+                                   'The paperwork is genuine and the loss has no connection to the '
+                                   'death.']],
+             'journal_lore': ['CASE 05 — THE OLD QUARTER',
+                              'Location of inquiry: Old Quarter Archives',
+                              'Deceased: Archivist Bell',
+                              'Current testimony suggests the public story about the death is '
+                              'incomplete.',
+                              'A silver moth token appears in the evidence chain yet again.',
+                              'The Blackwell family seems linked to the scene through a person, a '
+                              'document, or a piece of land.',
+                              "The night guard's patrol changes whenever anyone raises an alarm.",
+                              'The witness seems afraid of a threat beyond the murderer in this room.',
+                              'A false conclusion here could conceal evidence needed to unlock the '
+                              'next case.',
+                              'Only properly supported deductions can form the final accusation.'],
+             'suspect_alias': 'Nora Voss'},
+            {'title': 'The Glass Conservatory',
+             'place': 'Glass Conservatory',
+             'victim': 'Botanist Iris',
+             'culprit': 'Silas Wren',
+             'role': 'a wealthy patron',
+             'motive': "to sell a discovery tied to the Lantern's meeting place",
+             'scene': 'conservatory',
+             'threat': 'Moonlight through shattered glass makes every shadow look like an intruder.',
+             'intro': ['The conservatory should have smelled of earth and orchids. Instead it smells '
+                       'of rain and broken glass.',
+                       'Botanist Iris is found beside a smashed specimen cabinet, her hands stained '
+                       'green from a plant she died protecting.',
+                       "Pinned to a potting table is another moth token and a buyer's receipt torn in "
+                       'half.'],
+             'reveal': "Wren admits ordering the theft of Iris's specimen because it marked the route to "
+                       'the hidden docks used by the Lantern.',
+             'aftermath': "On the reverse of the buyer's receipt you find tide coordinates and the name "
+                          'Pike.',
+             'witness': 'She told me her sponsor smiled too easily. People who own glass houses should '
+                        'not carry stones in their pockets.',
+             'clues': [('Inward Glass Fall',
+                        'The shards fell inward, proving the window was broken from outside.'),
+                       ('Missing Inventory Slip',
+                        'One specimen was removed before the official audit began.'),
+                       ('Betrayal Note',
+                        "Iris's final note says her own sponsor arranged the theft.")],
+             'questions': [('Where did the intruder first enter?',
+                            'Inward Glass Fall',
+                            'The window was smashed from the garden side.'),
+                           ('What was stolen before the murder?',
+                            'Missing Inventory Slip',
+                            "Wren arranged the specimen's removal ahead of the audit."),
+                           ('Whom did Iris accuse?',
+                            'Betrayal Note',
+                            'The note identifies her sponsor, Silas Wren.')],
+             'cinematic': ['The glasshouse turns moonlight into shards of pale blue, and every leaf '
+                           'casts a knife-like shadow.',
+                           'Botanist Iris died with soil beneath her nails and a pressed flower '
+                           'hidden under her tongue.',
+                           'One specimen is gone, yet the empty shelf contains fresh water from the '
+                           'docks.',
+                           "A sponsor's name has been scratched from a brass plaque.",
+                           'The greenhouse attendant saw someone leave through the gardens without '
+                           'using the path.',
+                           'A moth token hangs from the frame of a cracked pane.',
+                           'The surviving orchids have been watered with saltwater, which should have '
+                           'killed them.',
+                           "A half-written letter begins: 'Silas, the map is not a map.'",
+                           "The patron's carriage arrives and leaves with one more trunk than it came "
+                           'with.',
+                           'You hear a glass panel shift in the rafters. A shadow is keeping pace '
+                           'above you.',
+                           "The plant's roots trace the direction of a buried drainage channel.",
+                           "Iris's last words were about a ship, not a flower."],
+             'supporting': ['Attendant Vera', 'Groundskeeper Ned'],
+             'room_name': 'Glasshouse Walk',
+             'discovery_moments': ['A small detail catches the light differently the second time you look.',
+                                   'You turn the item over slowly. Its meaning changes when you '
+                                   'remember what the witness said.',
+                                   'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
+             'dialogue': [{'speaker': 'Attendant Vera',
+                           'text': 'I knew Botanist Iris. They were frightened in the days before '
+                                   'the murder. I keep thinking I should have said something.'},
+                          {'speaker': 'Detective',
+                           'text': 'Start from the last moment you saw them alive. Leave nothing '
+                                   'out, even what seems unimportant.'},
+                          {'speaker': 'Attendant Vera',
+                           'text': 'She told me her sponsor smiled too easily. People who own '
+                                   'glass houses should not carry stones in their pockets.'},
+                          {'speaker': 'Detective',
+                           'text': 'And who else knew you would be here tonight?'},
+                          {'speaker': 'Attendant Vera',
+                           'text': 'There was a message with a silver moth on the seal. I thought '
+                                   'it was a family emblem.'},
+                          {'speaker': 'Detective',
+                           'text': 'This is the tenth time someone has told me that. Not one of '
+                                   'them looked relieved.'},
+                          {'speaker': 'Groundskeeper Ned',
+                           'text': 'The people who run this place have been told to pretend they '
+                                   'remember nothing.'},
+                          {'speaker': 'Groundskeeper Ned',
+                           'text': 'Even if I told you what I saw, I doubt you would believe who '
+                                   'told me to stay silent.'},
+                          {'speaker': 'Detective',
+                           'text': "I will decide what the evidence can support. I won't decide "
+                                   "before I've seen it."},
+                          {'speaker': 'Attendant Vera',
+                           'text': "Then search the room. You may find the truth, but it won't "
+                                   'make this night easier.'}],
+             'suspect_speech': ['You should have stayed away from Glass Conservatory. People who dig '
+                                'beneath a family usually find graves.',
+                                "I won't pretend I cared about Botanist Iris. But you don't know who "
+                                'truly wanted this done.',
+                                "The silver moth is not a symbol of loyalty. It's a reminder that "
+                                'someone can always see the light you stand in.',
+                                'Ask Evelyn why your case file already existed before the murder was '
+                                'reported.'],
+             'deduction_decoys': [['The damage was an ordinary accident at Glass Conservatory.',
+                                   'A stranger without access arrived after everyone left.'],
+                                  ['The witness mistook a harmless visitor for the suspect.',
+                                   'There is no reliable way to link the trace to any person.'],
+                                  ['The motive was a spontaneous argument unrelated to the '
+                                   'evidence.',
+                                   'The paperwork is genuine and the loss has no connection to the '
+                                   'death.']],
+             'journal_lore': ['CASE 06 — THE GLASS CONSERVATORY',
+                              'Location of inquiry: Glass Conservatory',
+                              'Deceased: Botanist Iris',
+                              'Current testimony suggests the public story about the death is '
+                              'incomplete.',
+                              'A silver moth token appears in the evidence chain yet again.',
+                              'The Blackwell family seems linked to the scene through a person, a '
+                              'document, or a piece of land.',
+                              "The night guard's patrol changes whenever anyone raises an alarm.",
+                              'The witness seems afraid of a threat beyond the murderer in this room.',
+                              'A false conclusion here could conceal evidence needed to unlock the '
+                              'next case.',
+                              'Only properly supported deductions can form the final accusation.'],
+             'suspect_alias': 'Silas Wren'},
+            {'title': 'The Drowned Docks',
+             'place': 'Drowned Docks',
+             'victim': 'Courier Nash',
+             'culprit': 'Harbor Master Pike',
+             'role': 'the harbor master',
+             'motive': 'to smuggle Lantern correspondence through an unlisted quay',
+             'scene': 'docks',
+             'threat': 'Fog horns, dark water, and stacked crates leave countless blind corners for an '
+                       'ambush.',
+             'intro': ["Nash's satchel washed ashore without the letter it was meant to protect.",
+                       'The harbor records show no unusual traffic, which usually means every unusual '
+                       'thing was paid for in cash.',
+                       'Inside the satchel lining you discover a damp moth token and an address at '
+                       'the old observatory.'],
+             'reveal': 'Pike tries to flee by launch and admits he only moved the messages; he never '
+                       'learned why the observatory mattered.',
+             'aftermath': 'The recovered correspondence mentions a rooftop meeting under a telescope and '
+                          'orders from Professor Crane.',
+             'witness': 'The current never would have carried the satchel from the public pier. Whoever '
+                        'tossed it did so from somewhere private.',
+             'clues': [('Contrary Tide Chart',
+                        'The tide direction proves the satchel came from the private quay, not the '
+                        'public pier.'),
+                       ('Braided Mooring Rope',
+                        "A rare rope braid matches the harbor master's launch."),
+                       ('Forged Cargo Docket',
+                        "An unlisted vessel arrived under a false name in Pike's own ledger.")],
+             'questions': [('Where was the satchel actually dumped?',
+                            'Contrary Tide Chart',
+                            "The current points back to Pike's private quay."),
+                           ('Which launch was used?',
+                            'Braided Mooring Rope',
+                            "The distinctive braid identifies Pike's launch."),
+                           ("Who hid the vessel's arrival?",
+                            'Forged Cargo Docket',
+                            'Pike altered the harbor register himself.')],
+             'cinematic': ['The docks swallow sound. Even your footsteps seem late returning from the '
+                           'fog.',
+                           "Nash's satchel is found where the tide could not have carried it.",
+                           'The harbor watch checks the same crate three times and never looks '
+                           'inside.',
+                           'Somebody has cut the lamps along the private quay.',
+                           "Pike's boat leaves no wake on the ledger, but its rope is wet.",
+                           'A cargo docket names a ship that was officially destroyed fourteen years '
+                           'ago.',
+                           'A lantern blinks from the far jetty: one long, two short, one long.',
+                           'In the fog, a hooded figure walks straight into a line of stacked crates '
+                           'and disappears.',
+                           'A note in the satchel reads: LOOK UP WHEN THE CITY LOOKS DOWN.',
+                           "Pike's ledger has a faint outline of a moth pressed through the page.",
+                           'The tide turns before dawn. You have only a narrow window to reach the '
+                           'observatory.',
+                           'From the pier the courthouse tower looks exactly like a lighthouse with '
+                           'its light put out.'],
+             'supporting': ['Sailor Bram', 'Dockhand Moss'],
+             'room_name': 'Moonlit Quay',
+             'discovery_moments': ['A small detail catches the light differently the second time you look.',
+                                   'You turn the item over slowly. Its meaning changes when you '
+                                   'remember what the witness said.',
+                                   'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
+             'dialogue': [{'speaker': 'Sailor Bram',
+                           'text': 'I knew Courier Nash. They were frightened in the days before '
+                                   'the murder. I keep thinking I should have said something.'},
+                          {'speaker': 'Detective',
+                           'text': 'Start from the last moment you saw them alive. Leave nothing '
+                                   'out, even what seems unimportant.'},
+                          {'speaker': 'Sailor Bram',
+                           'text': 'The current never would have carried the satchel from the '
+                                   'public pier. Whoever tossed it did so from somewhere private.'},
+                          {'speaker': 'Detective',
+                           'text': 'And who else knew you would be here tonight?'},
+                          {'speaker': 'Sailor Bram',
+                           'text': 'There was a message with a silver moth on the seal. I thought '
+                                   'it was a family emblem.'},
+                          {'speaker': 'Detective',
+                           'text': 'This is the tenth time someone has told me that. Not one of '
+                                   'them looked relieved.'},
+                          {'speaker': 'Dockhand Moss',
+                           'text': 'The people who run this place have been told to pretend they '
+                                   'remember nothing.'},
+                          {'speaker': 'Dockhand Moss',
+                           'text': 'Even if I told you what I saw, I doubt you would believe who '
+                                   'told me to stay silent.'},
+                          {'speaker': 'Detective',
+                           'text': "I will decide what the evidence can support. I won't decide "
+                                   "before I've seen it."},
+                          {'speaker': 'Sailor Bram',
+                           'text': "Then search the room. You may find the truth, but it won't "
+                                   'make this night easier.'}],
+             'suspect_speech': ['You should have stayed away from Drowned Docks. People who dig '
+                                'beneath a family usually find graves.',
+                                "I won't pretend I cared about Courier Nash. But you don't know who "
+                                'truly wanted this done.',
+                                "The silver moth is not a symbol of loyalty. It's a reminder that "
+                                'someone can always see the light you stand in.',
+                                'Ask Evelyn why your case file already existed before the murder was '
+                                'reported.'],
+             'deduction_decoys': [['The damage was an ordinary accident at Drowned Docks.',
+                                   'A stranger without access arrived after everyone left.'],
+                                  ['The witness mistook a harmless visitor for the suspect.',
+                                   'There is no reliable way to link the trace to any person.'],
+                                  ['The motive was a spontaneous argument unrelated to the '
+                                   'evidence.',
+                                   'The paperwork is genuine and the loss has no connection to the '
+                                   'death.']],
+             'journal_lore': ['CASE 07 — THE DROWNED DOCKS',
+                              'Location of inquiry: Drowned Docks',
+                              'Deceased: Courier Nash',
+                              'Current testimony suggests the public story about the death is '
+                              'incomplete.',
+                              'A silver moth token appears in the evidence chain yet again.',
+                              'The Blackwell family seems linked to the scene through a person, a '
+                              'document, or a piece of land.',
+                              "The night guard's patrol changes whenever anyone raises an alarm.",
+                              'The witness seems afraid of a threat beyond the murderer in this room.',
+                              'A false conclusion here could conceal evidence needed to unlock the '
+                              'next case.',
+                              'Only properly supported deductions can form the final accusation.'],
+             'suspect_alias': 'Harbor Master Pike'},
+            {'title': 'The Silent Observatory',
+             'place': 'Silent Observatory',
+             'victim': 'Astronomer Grey',
+             'culprit': 'Professor Crane',
+             'role': 'the observatory director',
+             'motive': 'to protect secret Lantern meetings hidden in plain sight',
+             'scene': 'observatory',
+             'threat': 'The dome turns like a gun turret over the city, and every metal footstep echoes '
+                       'into the dark.',
+             'intro': ["Grey's final sky chart mapped no constellation at all.",
+                       'Instead, his telescope was locked toward the courthouse tower and his last '
+                       'journal entry listed guest initials, not stars.',
+                       'At the base of the instrument lies yet another silver moth, scratched with a '
+                       'courthouse seal.'],
+             'reveal': 'Crane confesses the observatory dome was used to shield meetings, but insists '
+                       'the real founder still moves inside the Blackwell family itself.',
+             'aftermath': 'Impressions in a guest book name a magistrate and reference sealed evidence '
+                          'in the old courthouse archive.',
+             'witness': 'Grey said he had found a star that could ruin men in broad daylight. Then he '
+                        'laughed and pointed at the courthouse.',
+             'clues': [('Misaligned Star Chart',
+                        'The telescope angle matches the courthouse tower rather than a '
+                        'constellation.'),
+                       ('Broken Dome Gear',
+                        'A damaged gear jammed the dome mechanism and blocked an exit.'),
+                       ('Indented Guest Book',
+                        'Erased names still show through as impressions on the page.')],
+             'questions': [('What was Grey truly observing?',
+                            'Misaligned Star Chart',
+                            'He was watching the courthouse tower, not the night sky.'),
+                           ('How was escape prevented?',
+                            'Broken Dome Gear',
+                            'Someone jammed the dome with deliberate force.'),
+                           ('Who attended the secret meeting?',
+                            'Indented Guest Book',
+                            'The erased impressions identify Lantern trustees and Magistrate '
+                            'Blythe.')],
+             'cinematic': ['The telescope is pointed at the courthouse, but the dome is aligned with '
+                           'the moon.',
+                           "Grey's journal records people gathering at the tower as if they were "
+                           'celestial events.',
+                           'The observatory director has removed one gear and left its teeth lying on '
+                           'the floor.',
+                           'A cold circle on the desk shows where a flask once stood.',
+                           'Someone has marked the guest book with invisible pressure, not ink.',
+                           'The metal dome rotates. The exit moves behind you as the mechanism '
+                           'grinds.',
+                           "An old recording plays a man's voice reading out a trial verdict.",
+                           'Crane asks how many lives are worth preserving a single name.',
+                           "A brass moth is mounted inside the telescope's eyepiece cap.",
+                           'Your evidence points downward even as the telescope points toward the '
+                           'sky.',
+                           'The courthouse windows wink once in answer to a signal nobody sent.',
+                           'A second observer watches from the stairs. By the time you reach them, '
+                           'they are gone.'],
+             'supporting': ['Assistant Hester', 'Night Watcher'],
+             'room_name': 'Lower Dome',
+             'discovery_moments': ['A small detail catches the light differently the second time you look.',
+                                   'You turn the item over slowly. Its meaning changes when you '
+                                   'remember what the witness said.',
+                                   'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
+             'dialogue': [{'speaker': 'Assistant Hester',
+                           'text': 'I knew Astronomer Grey. They were frightened in the days '
+                                   'before the murder. I keep thinking I should have said '
+                                   'something.'},
+                          {'speaker': 'Detective',
+                           'text': 'Start from the last moment you saw them alive. Leave nothing '
+                                   'out, even what seems unimportant.'},
+                          {'speaker': 'Assistant Hester',
+                           'text': 'Grey said he had found a star that could ruin men in broad '
+                                   'daylight. Then he laughed and pointed at the courthouse.'},
+                          {'speaker': 'Detective',
+                           'text': 'And who else knew you would be here tonight?'},
+                          {'speaker': 'Assistant Hester',
+                           'text': 'There was a message with a silver moth on the seal. I thought '
+                                   'it was a family emblem.'},
+                          {'speaker': 'Detective',
+                           'text': 'This is the tenth time someone has told me that. Not one of '
+                                   'them looked relieved.'},
+                          {'speaker': 'Night Watcher',
+                           'text': 'The people who run this place have been told to pretend they '
+                                   'remember nothing.'},
+                          {'speaker': 'Night Watcher',
+                           'text': 'Even if I told you what I saw, I doubt you would believe who '
+                                   'told me to stay silent.'},
+                          {'speaker': 'Detective',
+                           'text': "I will decide what the evidence can support. I won't decide "
+                                   "before I've seen it."},
+                          {'speaker': 'Assistant Hester',
+                           'text': "Then search the room. You may find the truth, but it won't "
+                                   'make this night easier.'}],
+             'suspect_speech': ['You should have stayed away from Silent Observatory. People who dig '
+                                'beneath a family usually find graves.',
+                                "I won't pretend I cared about Astronomer Grey. But you don't know "
+                                'who truly wanted this done.',
+                                "The silver moth is not a symbol of loyalty. It's a reminder that "
+                                'someone can always see the light you stand in.',
+                                'Ask Evelyn why your case file already existed before the murder was '
+                                'reported.'],
+             'deduction_decoys': [['The damage was an ordinary accident at Silent Observatory.',
+                                   'A stranger without access arrived after everyone left.'],
+                                  ['The witness mistook a harmless visitor for the suspect.',
+                                   'There is no reliable way to link the trace to any person.'],
+                                  ['The motive was a spontaneous argument unrelated to the '
+                                   'evidence.',
+                                   'The paperwork is genuine and the loss has no connection to the '
+                                   'death.']],
+             'journal_lore': ['CASE 08 — THE SILENT OBSERVATORY',
+                              'Location of inquiry: Silent Observatory',
+                              'Deceased: Astronomer Grey',
+                              'Current testimony suggests the public story about the death is '
+                              'incomplete.',
+                              'A silver moth token appears in the evidence chain yet again.',
+                              'The Blackwell family seems linked to the scene through a person, a '
+                              'document, or a piece of land.',
+                              "The night guard's patrol changes whenever anyone raises an alarm.",
+                              'The witness seems afraid of a threat beyond the murderer in this room.',
+                              'A false conclusion here could conceal evidence needed to unlock the '
+                              'next case.',
+                              'Only properly supported deductions can form the final accusation.'],
+             'suspect_alias': 'Professor Crane'},
+            {'title': 'The Court of Ash',
+             'place': 'Old Courthouse',
+             'victim': 'Judge Harrow',
+             'culprit': 'Magistrate Blythe',
+             'role': 'a magistrate',
+             'motive': 'to bury the founding trial that protected the Lantern',
+             'scene': 'court',
+             'threat': 'The courthouse is all echoes and locked doors; once suspicion rises, every '
+                       'bailiff becomes a hunter.',
+             'intro': ['Harrow reopened a case older than you are and died the night before the '
+                       'hearing.',
+                       'The archive vault is sealed from the inside, but soot marks show the fire '
+                       'began in a document tray, not the furnace.',
+                       "Tucked inside a law volume is the ninth moth token and the words: 'She was "
+                       "acquitted to found them all.'"],
+             'reveal': 'Blythe confesses to the murder and to replacing trial pages—yet she fears Lady '
+                       'Evelyn more than prison or death.',
+             'aftermath': 'The restored transcript names Evelyn Blackwell as the hidden architect. The '
+                          'moth tokens align into a map of the family crypt.',
+             'witness': 'The trial had two verdicts. Someone wanted history to remember the innocent one '
+                        'and bury the other in ash.',
+             'clues': [('Replacement Transcript',
+                        'Several trial pages were substituted to hide a second verdict.'),
+                       ('Authorization Stamp',
+                        "The replacement pages bear Blythe's archive authorization stamp."),
+                       ('Dustless Passage',
+                        'A hidden corridor to the archives shows fresh footprints in otherwise '
+                        'settled dust.')],
+             'questions': [('What did the original verdict reveal?',
+                            'Replacement Transcript',
+                            'The founder was cleared through fraud, not innocence.'),
+                           ('Who inserted the false pages?',
+                            'Authorization Stamp',
+                            'Blythe authorized and installed the substitutions.'),
+                           ('How was the sealed archive reached?',
+                            'Dustless Passage',
+                            'The killer used an unrecorded private corridor.')],
+             'cinematic': ["Judge Harrow's office is immaculate. His trial notes are not.",
+                           'Every replaced transcript page contains the same faint printer error.',
+                           'A magistrate claims she has not entered the archive in years. Dust on her '
+                           'coat is from the archive ceiling.',
+                           'The courthouse clock rings one fewer time than it should.',
+                           "Harrow's last case file has your own initials penciled at the margin.",
+                           "A juror's statement ends mid-sentence and begins again in someone else's "
+                           'handwriting.',
+                           'Behind the bench, a narrow passage leads toward a sealed file room.',
+                           'Blythe has kept two verdicts under one case number.',
+                           'An old newspaper photograph shows Evelyn without looking one day younger '
+                           'than she does now.',
+                           "A moth-shaped keyhole appears on the underside of the judge's desk.",
+                           'You read the original verdict. The accused was the person who first hired '
+                           'you.',
+                           'The last token clicks into place. The floor plan leads back to the '
+                           'manor.'],
+             'supporting': ['Clerk Sloane', 'Bailiff Flint'],
+             'room_name': 'Sealed Records',
+             'discovery_moments': ['A small detail catches the light differently the second time you look.',
+                                   'You turn the item over slowly. Its meaning changes when you '
+                                   'remember what the witness said.',
+                                   'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
+             'dialogue': [{'speaker': 'Clerk Sloane',
+                           'text': 'I knew Judge Harrow. They were frightened in the days before '
+                                   'the murder. I keep thinking I should have said something.'},
+                          {'speaker': 'Detective',
+                           'text': 'Start from the last moment you saw them alive. Leave nothing '
+                                   'out, even what seems unimportant.'},
+                          {'speaker': 'Clerk Sloane',
+                           'text': 'The trial had two verdicts. Someone wanted history to remember '
+                                   'the innocent one and bury the other in ash.'},
+                          {'speaker': 'Detective',
+                           'text': 'And who else knew you would be here tonight?'},
+                          {'speaker': 'Clerk Sloane',
+                           'text': 'There was a message with a silver moth on the seal. I thought '
+                                   'it was a family emblem.'},
+                          {'speaker': 'Detective',
+                           'text': 'This is the tenth time someone has told me that. Not one of '
+                                   'them looked relieved.'},
+                          {'speaker': 'Bailiff Flint',
+                           'text': 'The people who run this place have been told to pretend they '
+                                   'remember nothing.'},
+                          {'speaker': 'Bailiff Flint',
+                           'text': 'Even if I told you what I saw, I doubt you would believe who '
+                                   'told me to stay silent.'},
+                          {'speaker': 'Detective',
+                           'text': "I will decide what the evidence can support. I won't decide "
+                                   "before I've seen it."},
+                          {'speaker': 'Clerk Sloane',
+                           'text': "Then search the room. You may find the truth, but it won't "
+                                   'make this night easier.'}],
+             'suspect_speech': ['You should have stayed away from Old Courthouse. People who dig '
+                                'beneath a family usually find graves.',
+                                "I won't pretend I cared about Judge Harrow. But you don't know who "
+                                'truly wanted this done.',
+                                "The silver moth is not a symbol of loyalty. It's a reminder that "
+                                'someone can always see the light you stand in.',
+                                'Ask Evelyn why your case file already existed before the murder was '
+                                'reported.'],
+             'deduction_decoys': [['The damage was an ordinary accident at Old Courthouse.',
+                                   'A stranger without access arrived after everyone left.'],
+                                  ['The witness mistook a harmless visitor for the suspect.',
+                                   'There is no reliable way to link the trace to any person.'],
+                                  ['The motive was a spontaneous argument unrelated to the '
+                                   'evidence.',
+                                   'The paperwork is genuine and the loss has no connection to the '
+                                   'death.']],
+             'journal_lore': ['CASE 09 — THE COURT OF ASH',
+                              'Location of inquiry: Old Courthouse',
+                              'Deceased: Judge Harrow',
+                              'Current testimony suggests the public story about the death is '
+                              'incomplete.',
+                              'A silver moth token appears in the evidence chain yet again.',
+                              'The Blackwell family seems linked to the scene through a person, a '
+                              'document, or a piece of land.',
+                              "The night guard's patrol changes whenever anyone raises an alarm.",
+                              'The witness seems afraid of a threat beyond the murderer in this room.',
+                              'A false conclusion here could conceal evidence needed to unlock the '
+                              'next case.',
+                              'Only properly supported deductions can form the final accusation.'],
+             'suspect_alias': 'Magistrate Blythe'},
+            {'title': 'The Last Lantern',
+             'place': 'Blackwell Crypt',
+             'victim': 'The final witness',
+             'culprit': 'Evelyn Blackwell',
+             'role': 'the hidden architect of the Lantern',
+             'motive': 'to preserve the family myth by controlling every witness and every record',
+             'scene': 'crypt',
+             'threat': 'The crypt is a maze of candles, stone, and family portraits; even victory feels '
+                       'like trespass.',
+             'intro': ['The nine silver moths fit together into a floor plan beneath the Blackwell '
+                       'estate.',
+                       'Lady Evelyn has been at your shoulder since the first death—offering help, '
+                       'steering your attention, feeding your anger.',
+                       'Now the crypt opens, and your final witness lies dying beside a recorder '
+                       'addressed to you alone.'],
+             'reveal': 'Evelyn admits every chapter served her design: each murder pruned a threat to '
+                       'the Blackwell legend and drew you downward, one truth at a time.',
+             'aftermath': 'With Evelyn dead, the Lantern collapses. The records survive. So does the '
+                          'uneasy knowledge that she turned your own hunger for justice into her final '
+                          'weapon.',
+             'witness': 'She said the family had to remain a story, not a bloodline. Stories survive '
+                        'because somebody chooses what is remembered.',
+             'clues': [('Moth Map', "The nine moth tokens lock together into the crypt's floor plan."),
+                       ("Founder's Portrait",
+                        'A concealed dedication names Evelyn as the surviving heir to the '
+                        'founder.'),
+                       ('Final Confession',
+                        'A sealed recording links Evelyn to every prior killing and every order.')],
+             'questions': [('What links all nine previous cases?',
+                            'Moth Map',
+                            'Each crime followed instructions embedded in the moth token network.'),
+                           ('Who truly founded and preserved the Lantern?',
+                            "Founder's Portrait",
+                            'Evelyn Blackwell inherited and directed the society.'),
+                           ('Who ordered the chain of murders?',
+                            'Final Confession',
+                            'The recording names Evelyn as the architect behind all ten '
+                            'chapters.')],
+             'cinematic': ['The manor is quiet when you return. The storm ended days ago. The windows '
+                           'are still lit.',
+                           'Nine brass moths fit together like wings around a hollow center.',
+                           'The crypt opens beneath the family portrait that was moved on the first '
+                           'night.',
+                           'A recording addressed to you plays in the voice of someone you buried '
+                           'three chapters ago.',
+                           'Evelyn is waiting under a circle of candles. She has dressed for a '
+                           'funeral but wears no mourning black.',
+                           'The surviving witness tries to speak. Evelyn closes their eyes before '
+                           'they can say her name.',
+                           "Every murder removed someone who might have contradicted the family's "
+                           'official history.',
+                           'The ledger reveals Evelyn funded the investigation as carefully as she '
+                           'funded the killings.',
+                           'She says she needed a detective brave enough to do what the Lantern could '
+                           'no longer do.',
+                           'Your journal lies open on the altar, its pages rearranged into the '
+                           'chronology she wanted you to discover.',
+                           'The final confession is real. So are the lives that will never be '
+                           'returned.',
+                           'You have one decision left: end the person who shaped the mystery, or '
+                           'become part of her ending.'],
+             'supporting': ['Evelyn', 'The last witness'],
+             'room_name': 'Family Crypt',
+             'discovery_moments': ['A small detail catches the light differently the second time you look.',
+                                   'You turn the item over slowly. Its meaning changes when you '
+                                   'remember what the witness said.',
+                                   'You turn the object over. Something on the reverse has escaped every other pair of eyes.'],
+             'dialogue': [{'speaker': 'Evelyn',
+                           'text': 'I knew The final witness. They were frightened in the days '
+                                   'before the murder. I keep thinking I should have said '
+                                   'something.'},
+                          {'speaker': 'Detective',
+                           'text': 'Start from the last moment you saw them alive. Leave nothing '
+                                   'out, even what seems unimportant.'},
+                          {'speaker': 'Evelyn',
+                           'text': 'She said the family had to remain a story, not a bloodline. '
+                                   'Stories survive because somebody chooses what is remembered.'},
+                          {'speaker': 'Detective',
+                           'text': 'And who else knew you would be here tonight?'},
+                          {'speaker': 'Evelyn',
+                           'text': 'There was a message with a silver moth on the seal. I thought '
+                                   'it was a family emblem.'},
+                          {'speaker': 'Detective',
+                           'text': 'This is the tenth time someone has told me that. Not one of '
+                                   'them looked relieved.'},
+                          {'speaker': 'The last witness',
+                           'text': 'The people who run this place have been told to pretend they '
+                                   'remember nothing.'},
+                          {'speaker': 'The last witness',
+                           'text': 'Even if I told you what I saw, I doubt you would believe who '
+                                   'told me to stay silent.'},
+                          {'speaker': 'Detective',
+                           'text': "I will decide what the evidence can support. I won't decide "
+                                   "before I've seen it."},
+                          {'speaker': 'Evelyn',
+                           'text': "Then search the room. You may find the truth, but it won't "
+                                   'make this night easier.'}],
+             'suspect_speech': ['You should have stayed away from Blackwell Crypt. People who dig '
+                                'beneath a family usually find graves.',
+                                "I won't pretend I cared about The final witness. But you don't know "
+                                'who truly wanted this done.',
+                                "The silver moth is not a symbol of loyalty. It's a reminder that "
+                                'someone can always see the light you stand in.',
+                                'Ask Evelyn why your case file already existed before the murder was '
+                                'reported.'],
+             'deduction_decoys': [['The damage was an ordinary accident at Blackwell Crypt.',
+                                   'A stranger without access arrived after everyone left.'],
+                                  ['The witness mistook a harmless visitor for the suspect.',
+                                   'There is no reliable way to link the trace to any person.'],
+                                  ['The motive was a spontaneous argument unrelated to the '
+                                   'evidence.',
+                                   'The paperwork is genuine and the loss has no connection to the '
+                                   'death.']],
+             'journal_lore': ['CASE 10 — THE LAST LANTERN',
+                              'Location of inquiry: Blackwell Crypt',
+                              'Deceased: The final witness',
+                              'Current testimony suggests the public story about the death is '
+                              'incomplete.',
+                              'A silver moth token appears in the evidence chain yet again.',
+                              'The Blackwell family seems linked to the scene through a person, a '
+                              'document, or a piece of land.',
+                              "The night guard's patrol changes whenever anyone raises an alarm.",
+                              'The witness seems afraid of a threat beyond the murderer in this room.',
+                              'A false conclusion here could conceal evidence needed to unlock the '
+                              'next case.',
+                              'Only properly supported deductions can form the final accusation.'],
+             'suspect_alias': 'Evelyn Blackwell'}]
 
 # Each discovery has a specific sensory detail rather than procedural narration.
 # These lines are written from the detective's viewpoint, not as tutorial text.
@@ -1803,7 +1802,6 @@ EVIDENCE_COORDS = [
     ((149, 132), (308, 211), (457, 140)),
 ]
 
-
 # Every cover identity has a social role and a story consequence. A convincing
 # uniform can get the detective into staff-only archives; a civilian disguise
 # blends better in a crowd but does not automatically grant restricted access.
@@ -1846,18 +1844,6 @@ COVER_LINES = [
     "The caretaker knows where every crypt key belongs; the mourners know only where to stand.",
 ]
 
-DECOY_LINES = [
-    "A coin strikes the marble. The watchman turns toward the sound rather than your footprints.",
-    "The metallic clink disappears under a hiss of steam. The guard breaks formation to investigate.",
-    "A coin rings against the bellhop's trolley. Footsteps hurry toward the wrong corridor.",
-    "A tiny sound in the darkened wings draws the stage guard away from the curtain.",
-    "An echo skips across the tiled archive. Someone searches the shelves you have already left.",
-    "The sound travels through glass and leaf. A watchman enters the wrong garden path.",
-    "A coin taps the dock planks. The watchman mistakes it for a loose mooring ring.",
-    "The dome amplifies the small metallic sound. The director's guard turns to investigate.",
-    "A clink against an iron rail sends the bailiff toward the old evidence room.",
-    "The coin falls into the stone silence. The caretaker looks toward the wrong tomb.",
-]
 
 RESTRICTED_ZONE = (370, 86, 515, 184)
 
@@ -1930,12 +1916,13 @@ def find_nearest_open(level, xy, radius=4):
             if 24 <= nx <= WORLD_W - 24 and 42 <= ny <= WORLD_H - 23 and not solid_at(level, nx, ny, radius):
                 candidates.append((nx, ny))
         if candidates:
-            return min(candidates, key=lambda p: (p[0] - x)**2 + (p[1] - y)**2)
+            return min(candidates, key=lambda p: (p[0] - x) ** 2 + (p[1] - y) ** 2)
     return (float(level.start[0]), float(level.start[1]))
 
 
 class NavigationGrid:
     """Compact room-scale A*: click movement and guard patrol share one map."""
+
     def __init__(self, level, step=6):
         self.level = level
         self.step = step
@@ -1958,7 +1945,7 @@ class NavigationGrid:
                        if abs(dx) == rad or abs(dy) == rad]
             options = [pt for pt in options if pt in self.clear]
             if options:
-                return min(options, key=lambda pt: (pt[0] - i)**2 + (pt[1] - j)**2)
+                return min(options, key=lambda pt: (pt[0] - i) ** 2 + (pt[1] - j) ** 2)
         return None
 
     def path(self, start, goal):
@@ -1979,20 +1966,20 @@ class NavigationGrid:
             if here == dst:
                 break
             i, j = here
-            for nb in ((i + 1,j),(i-1,j),(i,j+1),(i,j-1)):
+            for nb in ((i + 1, j), (i - 1, j), (i, j + 1), (i, j - 1)):
                 if nb not in self.clear or nb in closed:
                     continue
                 cost = g[here] + 1
                 if cost < g.get(nb, 1e10):
                     came[nb] = here
                     g[nb] = cost
-                    heapq.heappush(q, (cost + abs(nb[0]-dst[0]) + abs(nb[1]-dst[1]), nb))
+                    heapq.heappush(q, (cost + abs(nb[0] - dst[0]) + abs(nb[1] - dst[1]), nb))
         if dst not in came:
             return []
         path = []
         cur = dst
         while cur != src:
-            path.append((cur[0]*self.step, cur[1]*self.step))
+            path.append((cur[0] * self.step, cur[1] * self.step))
             cur = came[cur]
         path.reverse()
         # Remove collinear waypoints without allowing a shortcut through walls.
@@ -2012,7 +1999,8 @@ class NavigationGrid:
 def make_level(chapter: int) -> Level:
     ch = CHAPTERS[chapter]
     props = list(ROOM_PROPS[chapter])
-    objs = [Item("uniform", "Clothes left unattended", 90, 278, "coatstand", "A second identity hangs among these coats.")]
+    objs = [
+        Item("uniform", "Clothes left unattended", 90, 278, "coatstand", "A second identity hangs among these coats.")]
     for j, (name, detail) in enumerate(ch["clues"]):
         # Evidence belongs to the public investigation, not the guarded
         # infiltration. The private office contains OPTIONAL, story-rich proof.
@@ -2024,8 +2012,7 @@ def make_level(chapter: int) -> Level:
     # texture but never replace the three mandatory pieces of physical proof.
     optional_coords = [(188, 303), (360, 110), (487, 290)]
     for j, p in enumerate(optional_coords):
-        objs.append(Item(f"optional_{j}", f"Margin note {j+1}", p[0], p[1], "note", ch["cinematic"][j + 6], True))
-
+        objs.append(Item(f"optional_{j}", f"Margin note {j + 1}", p[0], p[1], "note", ch["cinematic"][j + 6], True))
 
     # Hiding spots now correspond to actual visible wardrobes, planters, or
     # stacked crates. There are no floating marker letters at their positions.
@@ -2375,7 +2362,8 @@ class PixelArt:
         self.line((x + 7, y + 30, x + 31, y + 8), (103, 119, 131), 6)
         self.line((x + 7, y + 30, x - 19, y + 15), (103, 119, 131), 6)
         self.line((x + 6, y + 28, x + 6, y + 50), (129, 135, 142), 5)
-        self.polygon([(x - 33, y + 10), (x + 28, y - 10), (x + 35, y + 7), (x - 26, y + 26)], (55, 76, 88), (149, 154, 147))
+        self.polygon([(x - 33, y + 10), (x + 28, y - 10), (x + 35, y + 7), (x - 26, y + 26)], (55, 76, 88),
+                     (149, 154, 147))
         self.line((x - 28, y + 10, x + 31, y - 6), (154, 163, 170), 2)
         self.ellipse((x - 39, y + 8, x - 28, y + 24), (26, 38, 54), (144, 143, 146))
 
@@ -2388,7 +2376,8 @@ class PixelArt:
 
     def small_object(self, kind, x, y, variant=0):
         # Keep item silhouettes crisp and recognizable. No text overlays.
-        if kind in {"paper", "letter", "note", "bill", "cue", "sketch", "inventory", "transcript", "starchart", "guestbook", "cargo", "tide", "record"}:
+        if kind in {"paper", "letter", "note", "bill", "cue", "sketch", "inventory", "transcript", "starchart",
+                    "guestbook", "cargo", "tide", "record"}:
             self.scattered_paper(x, y, variant)
             if kind in {"starchart", "tide", "sketch"}:
                 self.line((x - 3, y + 2, x + 4, y - 3), (52, 79, 95))
@@ -2415,7 +2404,8 @@ class PixelArt:
         elif kind in {"glass"}:
             self.glass(x, y, variant)
         elif kind in {"velvet"}:
-            self.polygon([(x - 9, y - 3), (x + 2, y - 8), (x + 10, y + 4), (x - 3, y + 7)], (102, 30, 53), (160, 76, 82))
+            self.polygon([(x - 9, y - 3), (x + 2, y - 8), (x + 10, y + 4), (x - 3, y + 7)], (102, 30, 53),
+                         (160, 76, 82))
         elif kind in {"burned"}:
             self.scattered_paper(x, y, 1)
             self.polygon([(x + 2, y - 5), (x + 8, y - 4), (x + 7, y + 3), (x + 4, y)], (54, 35, 30))
@@ -2562,6 +2552,7 @@ class PixelArt:
         self.vignette()
         return self.image
 
+
 # -----------------------------------------------------------------------------
 # DIRECTIONAL CHARACTER ANIMATION
 # Characters are 24x32 low-resolution pixel figures, not Tk shapes pretending
@@ -2593,7 +2584,6 @@ ACCESSORY_COLORS = [
     (163, 99, 112),
     (95, 155, 148),
 ]
-
 
 # HAND-CRAFTED 24x26 CHARACTER ART ATLAS
 # Each row is a raster line. These shapes are used on case cards,
@@ -4283,8 +4273,6 @@ ICON_RASTERS = {
     ),
 }
 
-
-
 ICON_COLORS = {
     "o": (20, 25, 34, 255),
     "p": (221, 202, 159, 255),
@@ -4385,7 +4373,8 @@ class AmbientParticles:
                 if VIEW_X < sx < VIEW_X + VIEW_W and VIEW_Y < sy < VIEW_Y + VIEW_H:
                     radius = sz + .8 * math.sin(elapsed * 2 + i)
                     canvas.create_oval(sx - radius, sy - radius, sx + radius, sy + radius,
-                                       fill="#97c5a5" if theme == "greenhouse" else "#5f91a4", outline="", tags="world_render")
+                                       fill="#97c5a5" if theme == "greenhouse" else "#5f91a4", outline="",
+                                       tags="world_render")
 
 
 # Room plans share wall/collision geometry with their paintings. Each room is
@@ -4408,40 +4397,64 @@ ROOM_TITLES = [
 SECRET_FEATURES = [
     ((274, 97), "the fireplace latch", "The fireplace rolls aside; a stair descends through the ash."),
     ((274, 94), "the abandoned freight lift", "The disused freight lift opens on an older service stair."),
-    ((90, 145), "the false back of the wardrobe", "The wardrobe gives way to a stone passage used by the hotel's staff."),
+    ((90, 145), "the false back of the wardrobe",
+     "The wardrobe gives way to a stone passage used by the hotel's staff."),
     ((411, 100), "the seam in the stage curtain", "Behind the velvet, a narrow service stair runs beneath the stage."),
     ((416, 94), "the loose archive shelving", "The shelf pivots and reveals a forgotten stair of stacked stone."),
     ((466, 108), "the maintenance hatch behind the glass", "An iron grate beneath the glass opens over brick steps."),
-    ((269, 115), "the concealed dockside hatch", "Salt-soaked boards lift from a stone stair to the old drainage route."),
+    ((269, 115), "the concealed dockside hatch",
+     "Salt-soaked boards lift from a stone stair to the old drainage route."),
     ((316, 117), "the telescope's service latch", "A brass catch releases a narrow stair under the dome."),
     ((275, 126), "the judge's hidden panel", "The magistrate's bench slides aside, exposing a foundation stair."),
     ((328, 221), "the concealed portrait hinge", "The founder's portrait moves on a hinge; worn stone steps descend."),
 ]
 
 ROOM_MOODS = [
-    ("A live fire keeps the cold from the family's empty chairs.", "The steward's books are too neat to be honest.", "Coal dust gives way to older stone. Someone went to great lengths to hide this."),
-    ("Steam whistles beneath a vaulted roof.", "There are two manifests, and only one was shown to the authorities.", "A disused platform runs beneath the modern station."),
-    ("Polished marble conceals the smell of disinfectant.", "The doctor's locked records are laid out beside an examination couch.", "The hotel's abandoned heating passage hides old patient files."),
-    ("Empty seats face a stage still bright with ghost light.", "Cue books and black velvet fill the cramped office.", "Above the scenery, the theater keeps its oldest secrets."),
-    ("Dust softens every step in the municipal archive.", "The registrar's personal records contradict the city's.", "Behind the shelves, a second catalogue has escaped the fire."),
-    ("Rain taps a thousand small panes of glass.", "Iris's research sits beneath the patron's lock.", "Roots push through the bricks as though the garden is reclaiming them."),
-    ("The tide speaks louder than anyone in the harbor office.", "Unregistered cargo has been entered in a private ledger.", "The drains point toward a quay missing from every chart."),
-    ("The dome trembles against the night wind.", "The director's sightline ends at the courthouse tower.", "The brass instruments share a secret mechanism."),
-    ("Every footstep returns as an accusation.", "Sealed judgments line the private chambers.", "The original verdict lies behind the courthouse's foundation."),
-    ("The family portraits seem to watch you leave.", "Evelyn arranged the truth like a trap.", "The crypt is older than the manor above it."),
+    ("A live fire keeps the cold from the family's empty chairs.", "The steward's books are too neat to be honest.",
+     "Coal dust gives way to older stone. Someone went to great lengths to hide this."),
+    ("Steam whistles beneath a vaulted roof.", "There are two manifests, and only one was shown to the authorities.",
+     "A disused platform runs beneath the modern station."),
+    ("Polished marble conceals the smell of disinfectant.",
+     "The doctor's locked records are laid out beside an examination couch.",
+     "The hotel's abandoned heating passage hides old patient files."),
+    ("Empty seats face a stage still bright with ghost light.", "Cue books and black velvet fill the cramped office.",
+     "Above the scenery, the theater keeps its oldest secrets."),
+    ("Dust softens every step in the municipal archive.", "The registrar's personal records contradict the city's.",
+     "Behind the shelves, a second catalogue has escaped the fire."),
+    ("Rain taps a thousand small panes of glass.", "Iris's research sits beneath the patron's lock.",
+     "Roots push through the bricks as though the garden is reclaiming them."),
+    ("The tide speaks louder than anyone in the harbor office.",
+     "Unregistered cargo has been entered in a private ledger.",
+     "The drains point toward a quay missing from every chart."),
+    ("The dome trembles against the night wind.", "The director's sightline ends at the courthouse tower.",
+     "The brass instruments share a secret mechanism."),
+    ("Every footstep returns as an accusation.", "Sealed judgments line the private chambers.",
+     "The original verdict lies behind the courthouse's foundation."),
+    ("The family portraits seem to watch you leave.", "Evelyn arranged the truth like a trap.",
+     "The crypt is older than the manor above it."),
 ]
 
 PRIVATE_PROPS = [
-    [("bookcase", 148, 68, 0), ("bookcase", 217, 68, 1), ("desk", 348, 100, 1), ("armchair", 395, 245, 0), ("painting", 290, 42, 1), ("clock", 464, 54, 1), ("wardrobe", 468, 295, 0)],
-    [("bench", 153, 84, 0), ("desk", 365, 95, 0), ("suitcase", 223, 146, 0), ("clock", 287, 51, 0), ("coatstand", 474, 285, 0), ("crate", 389, 261, 0)],
-    [("counter", 145, 78, 0), ("desk", 345, 95, 0), ("bell", 337, 94, 0), ("armchair", 399, 271, 0), ("wardrobe", 474, 284, 1), ("plant", 192, 294, 1)],
-    [("piano", 148, 77, 0), ("desk", 342, 103, 0), ("film", 377, 105, 0), ("velvet", 436, 250, 0), ("wardrobe", 470, 280, 0), ("coatstand", 200, 271, 0)],
-    [("bookcase", 147, 70, 1), ("bookcase", 213, 70, 2), ("desk", 347, 105, 0), ("clock", 460, 45, 0), ("bookcase", 465, 265, 0), ("armchair", 215, 279, 0)],
-    [("plant", 167, 77, 2), ("plant", 226, 79, 1), ("desk", 340, 104, 0), ("plant", 450, 272, 0), ("bench", 183, 273, 0), ("glass", 389, 112, 1)],
-    [("crate", 165, 69, 1), ("crate", 198, 71, 0), ("desk", 343, 96, 0), ("barrel", 457, 279, 0), ("rope", 213, 272, 0), ("lantern", 308, 52, 0)],
-    [("telescope", 203, 86, 0), ("desk", 346, 104, 0), ("bookshelf", 456, 270, 1), ("scope", 192, 266, 0), ("globe", 428, 91, 0), ("clock", 304, 52, 2)],
-    [("judgebench", 143, 82, 0), ("desk", 342, 105, 0), ("bookshelf", 450, 272, 0), ("portrait", 280, 47, 0), ("bench", 170, 281, 1)],
-    [("altar", 164, 76, 0), ("desk", 345, 105, 0), ("portrait", 286, 48, 2), ("statue", 459, 260, 0), ("candle", 328, 98, 0), ("coffin", 176, 272, 0)],
+    [("bookcase", 148, 68, 0), ("bookcase", 217, 68, 1), ("desk", 348, 100, 1), ("armchair", 395, 245, 0),
+     ("painting", 290, 42, 1), ("clock", 464, 54, 1), ("wardrobe", 468, 295, 0)],
+    [("bench", 153, 84, 0), ("desk", 365, 95, 0), ("suitcase", 223, 146, 0), ("clock", 287, 51, 0),
+     ("coatstand", 474, 285, 0), ("crate", 389, 261, 0)],
+    [("counter", 145, 78, 0), ("desk", 345, 95, 0), ("bell", 337, 94, 0), ("armchair", 399, 271, 0),
+     ("wardrobe", 474, 284, 1), ("plant", 192, 294, 1)],
+    [("piano", 148, 77, 0), ("desk", 342, 103, 0), ("film", 377, 105, 0), ("velvet", 436, 250, 0),
+     ("wardrobe", 470, 280, 0), ("coatstand", 200, 271, 0)],
+    [("bookcase", 147, 70, 1), ("bookcase", 213, 70, 2), ("desk", 347, 105, 0), ("clock", 460, 45, 0),
+     ("bookcase", 465, 265, 0), ("armchair", 215, 279, 0)],
+    [("plant", 167, 77, 2), ("plant", 226, 79, 1), ("desk", 340, 104, 0), ("plant", 450, 272, 0),
+     ("bench", 183, 273, 0), ("glass", 389, 112, 1)],
+    [("crate", 165, 69, 1), ("crate", 198, 71, 0), ("desk", 343, 96, 0), ("barrel", 457, 279, 0), ("rope", 213, 272, 0),
+     ("lantern", 308, 52, 0)],
+    [("telescope", 203, 86, 0), ("desk", 346, 104, 0), ("bookshelf", 456, 270, 1), ("scope", 192, 266, 0),
+     ("globe", 428, 91, 0), ("clock", 304, 52, 2)],
+    [("judgebench", 143, 82, 0), ("desk", 342, 105, 0), ("bookshelf", 450, 272, 0), ("portrait", 280, 47, 0),
+     ("bench", 170, 281, 1)],
+    [("altar", 164, 76, 0), ("desk", 345, 105, 0), ("portrait", 286, 48, 2), ("statue", 459, 260, 0),
+     ("candle", 328, 98, 0), ("coffin", 176, 272, 0)],
 ]
 
 PASSAGE_PROPS = [
@@ -4481,8 +4494,8 @@ def make_room(chapter, room):
         world.objects = [Item("private_file", "The private register", 458, 155,
                               "paper", SECRET_REVEALS[chapter])]
         world.witness = Agent(46, 46)
-        world.killer = Agent(450, 106, "down", coat=(chapter+2)%4,
-                             hair=(chapter+1)%4, skin=1, hat=chapter%2==0)
+        world.killer = Agent(450, 106, "down", coat=(chapter + 2) % 4,
+                             hair=(chapter + 1) % 4, skin=1, hat=chapter % 2 == 0)
         world.civilians = []
         world.hide_positions = [(91, 309), (495, 305)]
         world.blend_zones = []
@@ -4534,18 +4547,19 @@ class RoomPainter(PixelArt):
                 self.rect((248, 53, 299, 88), (11, 17, 25), (143, 96, 69), 2)
                 self.rect((254, 58, 293, 85), (20, 22, 31))
                 for i in range(5):
-                    self.line((254 + i * 2, 64 + i * 4, 293 - i * 2, 64 + i * 4), (80 + i*7, 67 + i*5, 62+i*3), 2)
+                    self.line((254 + i * 2, 64 + i * 4, 293 - i * 2, 64 + i * 4), (80 + i * 7, 67 + i * 5, 62 + i * 3),
+                              2)
                 self.rect((238, 45, 244, 79), (111, 76, 61), (144, 98, 69))
             if self.chapter != 0:
                 fx, fy = SECRET_FEATURES[self.chapter][0]
                 # A small brass hinge is placed on an existing architectural
                 # feature, not a freestanding black hatch on the floor.
-                self.rect((fx-3, fy-3, fx+3, fy+3), (102, 69, 48), (166, 123, 69))
-                self.ellipse((fx-1, fy-1, fx+1, fy+1), (233, 179, 94))
+                self.rect((fx - 3, fy - 3, fx + 3, fy + 3), (102, 69, 48), (166, 123, 69))
+                self.ellipse((fx - 1, fy - 1, fx + 1, fy + 1), (233, 179, 94))
                 if self.hearth_open:
-                    self.rect((fx-13, fy-13, fx+13, fy-5), (18, 21, 29), (125, 95, 72))
-                    for yy in range(fy-11, fy-3, 3):
-                        self.line((fx-9, yy, fx+9, yy), (115, 93, 79))
+                    self.rect((fx - 13, fy - 13, fx + 13, fy - 5), (18, 21, 29), (125, 95, 72))
+                    for yy in range(fy - 11, fy - 3, 3):
+                        self.line((fx - 9, yy, fx + 9, yy), (115, 93, 79))
         elif self.room == 1:
             self.rect((0, 178, 30, 236), (79, 54, 46), (169, 122, 71), 2)
             self.rect((9, 185, 29, 229), (35, 31, 38), (136, 98, 68))
@@ -4561,7 +4575,7 @@ class RoomPainter(PixelArt):
             self.rect((266, 238, 275, 247), (141, 106, 74))
             self.rect((321, 238, 330, 247), (141, 106, 74))
             for x in (160, 232, 365, 434):
-                self.rect((x, 45, x+29, 60), (62, 44, 45), (130, 96, 67))
+                self.rect((x, 45, x + 29, 60), (62, 44, 45), (130, 96, 67))
         else:
             # The cellar entry opens onto actual descending steps along the
             # south wall; arch and floor match the narrow stairwell.
@@ -4612,14 +4626,14 @@ class RoomPainter(PixelArt):
         self.rect((347, 65, 504, 221), shade(p["floor"], 1.08), shade(p["trim"], .65))
         for x in range(359, 502, 23):
             for y in range(75, 219, 23):
-                self.rect((x, y, x+21, y+21),
-                          p["floor2"] if ((x+y)//23)%2 else shade(p["floor"], 1.12),
+                self.rect((x, y, x + 21, y + 21),
+                          p["floor2"] if ((x + y) // 23) % 2 else shade(p["floor"], 1.12),
                           shade(p["floor_line"], .8))
         # Lamps and discreet files read as a work area, not a public hall.
         for x in (174, 283, 471):
-            self.rect((x, 43, x+23, 59), (46, 51, 63), p["trim"])
-            self.rect((x+6, 47, x+17, 55), p["warm"])
-            self.lights.append((x+12, 52, 36, p["warm"]))
+            self.rect((x, 43, x + 23, 59), (46, 51, 63), p["trim"])
+            self.rect((x + 6, 47, x + 17, 55), p["warm"])
+            self.lights.append((x + 12, 52, 36, p["warm"]))
         self.small_rug(372, 259, 102, 50, color=shade(p["rug"], .71))
         if self.chapter in {1, 6}:
             for x in (198, 252, 308):
@@ -4633,38 +4647,39 @@ class RoomPainter(PixelArt):
             self.ellipse((224, 260, 306, 336), None, (104, 128, 147), 2)
 
     def _underground_architecture(self):
-        slate=(33,37,45) if self.chapter != 5 else (31,49,42)
-        mortar=(74,71,76) if self.chapter != 5 else (76,87,77)
+        slate = (33, 37, 45) if self.chapter != 5 else (31, 49, 42)
+        mortar = (74, 71, 76) if self.chapter != 5 else (76, 87, 77)
         self.rect((20, 39, 527, 357), slate)
         # Hand-laid masonry: alternating brick joints, different from the
         # manor parquet or office tiles, and fully pixel-aligned.
         for y in range(43, 357, 14):
-            for x in range(24+((y//14)%2)*20, 526, 41):
-                self.rect((x, y, min(x+39,526), min(y+12,356)),
-                          (44+((x+y)%4)*2, 48+((x//17)%4)*2, 57+((y//17)%3)*2), mortar)
+            for x in range(24 + ((y // 14) % 2) * 20, 526, 41):
+                self.rect((x, y, min(x + 39, 526), min(y + 12, 356)),
+                          (44 + ((x + y) % 4) * 2, 48 + ((x // 17) % 4) * 2, 57 + ((y // 17) % 3) * 2), mortar)
         # Corridor is cut between two heavy buttress walls.
         self.rect((124, 79, 425, 355), (50, 48, 51), mortar)
         for yy in range(85, 349, 25):
-            for xx in range(129+(12 if yy//25%2 else 0), 422, 36):
-                self.rect((xx, yy, xx+34, yy+23), (55, 52, 54), (82, 74, 70))
-        self.rect((20, 60, 119, 294), (26,29,36), (93,79,73), 2)
-        self.rect((429, 60, 528, 294), (26,29,36), (93,79,73), 2)
+            for xx in range(129 + (12 if yy // 25 % 2 else 0), 422, 36):
+                self.rect((xx, yy, xx + 34, yy + 23), (55, 52, 54), (82, 74, 70))
+        self.rect((20, 60, 119, 294), (26, 29, 36), (93, 79, 73), 2)
+        self.rect((429, 60, 528, 294), (26, 29, 36), (93, 79, 73), 2)
         for y in range(69, 284, 29):
-            self.line((23, y, 116, y), (70,64,65))
-            self.line((432, y, 525, y), (70,64,65))
-        self.rect((126, 221, 252, 234), (35,38,45), (110,91,77))
-        self.rect((308, 221, 422, 234), (35,38,45), (110,91,77))
-        self.small_rug(256, 86, 47, 121, color=(60,53,62))
+            self.line((23, y, 116, y), (70, 64, 65))
+            self.line((432, y, 525, y), (70, 64, 65))
+        self.rect((126, 221, 252, 234), (35, 38, 45), (110, 91, 77))
+        self.rect((308, 221, 422, 234), (35, 38, 45), (110, 91, 77))
+        self.small_rug(256, 86, 47, 121, color=(60, 53, 62))
         # The stairs descend away from camera and end at an actual landing.
-        self.rect((247, 95, 314, 188), (29,32,40), (105,91,80),2)
+        self.rect((247, 95, 314, 188), (29, 32, 40), (105, 91, 80), 2)
         for i in range(8):
-            sy=102+i*10
-            self.rect((251+i//3,sy,310-i//3,sy+6),
-                      (62+i*3, 59+i*3, 62+i*2), (96,83,75))
-        for x, y in ((135, 101),(408, 101),(155, 297),(391, 297)):
-            self.rect((x-4,y-7,x+4,y+4), (121,85,58), (45,37,38))
-            self.ellipse((x-2,y-9,x+2,y-4), (233,178,94))
-            self.lights.append((x,y,40, (225,163,91)))
+            sy = 102 + i * 10
+            self.rect((251 + i // 3, sy, 310 - i // 3, sy + 6),
+                      (62 + i * 3, 59 + i * 3, 62 + i * 2), (96, 83, 75))
+        for x, y in ((135, 101), (408, 101), (155, 297), (391, 297)):
+            self.rect((x - 4, y - 7, x + 4, y + 4), (121, 85, 58), (45, 37, 38))
+            self.ellipse((x - 2, y - 9, x + 2, y - 4), (233, 178, 94))
+            self.lights.append((x, y, 40, (225, 163, 91)))
+
 
 class SpriteFactory:
     """An in-memory sprite sheet generator with cached PhotoImage frames."""
@@ -4786,12 +4801,12 @@ class TitleIllustration:
             d.rectangle((x, y, x + 1, y + 1), fill=self.rng.choice([(53, 74, 123), (79, 93, 149), (116, 123, 173)]))
         d.ellipse((414, 31, 476, 93), fill=(238, 206, 132), outline=(250, 224, 161), width=2)
         for px, py, r in [(435, 48, 5), (457, 60, 7), (436, 74, 4)]:
-            d.ellipse((px-r, py-r, px+r, py+r), fill=(218, 188, 120))
+            d.ellipse((px - r, py - r, px + r, py + r), fill=(218, 188, 120))
         for i in range(9):
             xx = i * 70 - 22
             yy = 142 + (i % 3) * 18
-            d.polygon([(xx-18, yy+31), (xx+17, yy-25), (xx+56, yy+31)], fill=(12, 26, 51))
-            d.rectangle((xx-18, yy+30, xx+56, 259), fill=(14, 29, 52))
+            d.polygon([(xx - 18, yy + 31), (xx + 17, yy - 25), (xx + 56, yy + 31)], fill=(12, 26, 51))
+            d.rectangle((xx - 18, yy + 30, xx + 56, 259), fill=(14, 29, 52))
 
         # Each block is a complete facade at its own depth. Roofs and wall
         # details are painted BEFORE the windows. Owner masks identify the
@@ -4810,77 +4825,81 @@ class TitleIllustration:
             stone = (20 + kind * 3, 36 + kind * 4, 65 + kind * 3)
             d.rectangle((x1, y1, x2, y2), fill=stone, outline=(40, 61, 89), width=1)
             od.rectangle((x1, y1, x2, y2), fill=index)
-            d.polygon([(x1-13, y1+3), ((x1+x2)//2, roof), (x2+13, y1+3)], fill=(18, 32, 61), outline=(45, 63, 101))
-            od.polygon([(x1-13, y1+3), ((x1+x2)//2, roof), (x2+13, y1+3)], fill=-1)
+            d.polygon([(x1 - 13, y1 + 3), ((x1 + x2) // 2, roof), (x2 + 13, y1 + 3)], fill=(18, 32, 61),
+                      outline=(45, 63, 101))
+            od.polygon([(x1 - 13, y1 + 3), ((x1 + x2) // 2, roof), (x2 + 13, y1 + 3)], fill=-1)
             # Restrained masonry marks, none drawn across a window later.
-            for yy in range(y1+15, y2-10, 20):
-                for xx in range(x1+8, x2-8, 32):
+            for yy in range(y1 + 15, y2 - 10, 20):
+                for xx in range(x1 + 8, x2 - 8, 32):
                     if self.rng.random() < .58:
                         d.line((xx, yy, xx + 10, yy), fill=(35, 52, 77))
         owners = owner.load()
         for index, (x1, y1, x2, y2, kind) in enumerate(buildings):
             pane_w, pane_h = 21, 34
-            for xx in range(x1+11, x2-pane_w-9, 37):
-                for yy in range(y1+25, y2-pane_h-13, 52):
+            for xx in range(x1 + 11, x2 - pane_w - 9, 37):
+                for yy in range(y1 + 25, y2 - pane_h - 13, 52):
                     # The full frame and a two-pixel safety zone must be
                     # owned by the same facade at this exact depth.
                     pts = [
-                        (xx-3, yy-3), (xx+pane_w+3, yy-3),
-                        (xx-3, yy+pane_h+3), (xx+pane_w+3, yy+pane_h+3),
-                        (xx + pane_w//2, yy+pane_h//2),
+                        (xx - 3, yy - 3), (xx + pane_w + 3, yy - 3),
+                        (xx - 3, yy + pane_h + 3), (xx + pane_w + 3, yy + pane_h + 3),
+                        (xx + pane_w // 2, yy + pane_h // 2),
                     ]
                     if any(not (0 <= ax < w and 0 <= ay < h) or owners[ax, ay] != index for ax, ay in pts):
                         continue
                     lit = self.rng.random() < .86
                     frame = (61, 64, 73)
                     glow = (231, 173, 77) if lit else (10, 20, 41)
-                    d.rectangle((xx, yy, xx+pane_w, yy+pane_h), fill=glow, outline=frame, width=2)
-                    d.line((xx+10, yy+2, xx+10, yy+pane_h-2), fill=(81, 64, 60), width=2)
-                    d.line((xx+1, yy+17, xx+pane_w-1, yy+17), fill=(81, 64, 60), width=2)
+                    d.rectangle((xx, yy, xx + pane_w, yy + pane_h), fill=glow, outline=frame, width=2)
+                    d.line((xx + 10, yy + 2, xx + 10, yy + pane_h - 2), fill=(81, 64, 60), width=2)
+                    d.line((xx + 1, yy + 17, xx + pane_w - 1, yy + 17), fill=(81, 64, 60), width=2)
                     if lit:
-                        d.rectangle((xx+4, yy+4, xx+7, yy+8), fill=(252, 213, 126))
+                        d.rectangle((xx + 4, yy + 4, xx + 7, yy + 8), fill=(252, 213, 126))
         # Door and garden steps are in the foreground of the frontage.
         d.rectangle((254, 251, 300, 322), fill=(80, 51, 43), outline=(145, 99, 65), width=2)
         d.rectangle((263, 263, 291, 313), fill=(191, 131, 76), outline=(224, 164, 100), width=2)
         d.ellipse((287, 285, 291, 289), fill=(247, 216, 148))
         for yy in range(316, 331, 5):
-            d.rectangle((244-(yy-316), yy, 309+(yy-316), yy+2), fill=(62, 68, 83))
+            d.rectangle((244 - (yy - 316), yy, 309 + (yy - 316), yy + 2), fill=(62, 68, 83))
         d.polygon([(245, 322), (315, 322), (416, 387), (136, 387)], fill=(23, 38, 58))
         for yy in range(328, 386, 9):
             offset = self.rng.randrange(-21, 22)
-            d.line((277-(yy-320)*2+offset, yy, 279+(yy-320)*2+offset, yy), fill=(43, 67, 87))
+            d.line((277 - (yy - 320) * 2 + offset, yy, 279 + (yy - 320) * 2 + offset, yy), fill=(43, 67, 87))
             if self.rng.random() < .62:
-                d.line((269+offset, yy+2, 289+offset, yy+2), fill=(147, 117, 74))
+                d.line((269 + offset, yy + 2, 289 + offset, yy + 2), fill=(147, 117, 74))
         for tx, ty, sc in [(26, 345, 1.3), (559, 344, 1.2), (75, 355, .8), (508, 354, .8)]:
-            d.line((tx, ty, tx-5, ty-113*sc), fill=(12, 24, 41), width=9)
+            d.line((tx, ty, tx - 5, ty - 113 * sc), fill=(12, 24, 41), width=9)
             for k in range(5):
-                ry = ty-30-k*20*sc
-                d.line((tx, ry, tx-30+8*k, ry-25), fill=(15, 28, 47), width=6)
-                d.line((tx, ry, tx+34-6*k, ry-23), fill=(15, 28, 47), width=6)
+                ry = ty - 30 - k * 20 * sc
+                d.line((tx, ry, tx - 30 + 8 * k, ry - 25), fill=(15, 28, 47), width=6)
+                d.line((tx, ry, tx + 34 - 6 * k, ry - 23), fill=(15, 28, 47), width=6)
                 for j in range(6):
-                    px = tx+self.rng.randint(-36, 36)
-                    py = ry+self.rng.randint(-24, 9)
-                    d.rectangle((px, py, px+9, py+7), fill=self.rng.choice([(12, 29, 45), (15, 37, 54), (18, 43, 60)]))
+                    px = tx + self.rng.randint(-36, 36)
+                    py = ry + self.rng.randint(-24, 9)
+                    d.rectangle((px, py, px + 9, py + 7),
+                                fill=self.rng.choice([(12, 29, 45), (15, 37, 54), (18, 43, 60)]))
         for _ in range(42):
             rx, ry = self.rng.randrange(180, 396), self.rng.randrange(322, 387)
             if abs(rx - 278) < (ry - 310) * 1.7:
-                d.line((rx, ry, rx+self.rng.randrange(3, 23), ry), fill=self.rng.choice([(98, 90, 76), (141, 111, 71), (64, 85, 105)]))
+                d.line((rx, ry, rx + self.rng.randrange(3, 23), ry),
+                       fill=self.rng.choice([(98, 90, 76), (141, 111, 71), (64, 85, 105)]))
         return im
-#Woody's PPR
-   
+
+
+# Woody's PPR
+
 manor_hints = [
     "Everyone keeps quoting the exact same time. Take a closer look at the clock in the study.",
     "Someone came in from the storm tonight. Check the floor for anything they left behind.",
     "Not every paper in this house burned completely. What was someone so desperate to destroy?",
 ]
 
-def get_hint(found_clues):
-        for i in range(len(manor_hints)):
-            if i not in found_clues:
-                return manor_hints[i]
-        return "You have all the evidence. Time to make your deduction."
-    
 
+def get_hint(found_clues):
+    for i in range(len(manor_hints)):
+        if i not in found_clues:
+            return manor_hints[i]
+    return "You have all the evidence. Time to make your deduction."
 
 
 class BlackwellGame:
@@ -4892,8 +4911,7 @@ class BlackwellGame:
         root.minsize(SW, SH)
         root.resizable(False, False)
         self.canvas = tk.Canvas(root, width=SW, height=SH, bg=C["black"], highlightthickness=0)
-        # expand=True keeps the canvas centred when fullscreen is larger than it.
-        self.canvas.pack(expand=True)
+        self.canvas.pack()
         self.font_small = "Courier New"
         self.font_title = "Georgia"
         self.buttons: list[tuple[tuple[float, float, float, float], Callable]] = []
@@ -4915,6 +4933,8 @@ class BlackwellGame:
         self.solved: set[int] = set()
         self.witness_spoken = False
         self.wrong_attempts = 0
+        self.deduction_mistakes: set[int] = set()
+        self.spotted_count = 0
         self.hush = 0.0
         self.world = make_level(0)
         self.room_index = 0
@@ -4935,13 +4955,9 @@ class BlackwellGame:
         self.blending = False
         self.crouched = False
         self.running = False
-        self.focus = False
         self.disguise = None  # None / "staff" / "guest"
         self.cover_blown = False
         self.scrutiny = 0.0
-        self.coins = 3
-        self.decoy = None
-        self.decoy_expire = 0.0
         self.infiltration_uncovered = False
         self.restricted_warning_at = -9.0
         self.cam_x = 0.0
@@ -4971,18 +4987,23 @@ class BlackwellGame:
         self._scene_emitters = {}
         self._world_alerts = {}
         self._world_sparkle = []
-        self._world_decoy = []
-        self._focus_was_active = False
         self.last_tick = time.perf_counter()
         self.cutscene_step = 0
         self.dialogue_step = 0
         self.confront_step = 0
         self.deduction_chosen = None
         self.end_grade = ""
+        # Developer tools are opened with on-screen buttons (no function keys).
+        self.debug_return_screen = "menu"
+        self.debug_return_overlay = None
+        self.debug_target_chapter = self.chapter
+        self.debug_score = 0
+        self.debug_score_override = False
         self.ui_scroll = 0
         self.name_entry: Optional[tk.Entry] = None
         self.name_entry_open = False
-        self.particles = [(random.Random(i * 121 + 5).randrange(584), random.Random(i * 312 + 7).randrange(388)) for i in range(65)]
+        self.particles = [(random.Random(i * 121 + 5).randrange(584), random.Random(i * 312 + 7).randrange(388)) for i
+                          in range(65)]
         self.load()
         self.make_title()
         self.prepare_chapter(self.chapter, reset=False)
@@ -4993,11 +5014,7 @@ class BlackwellGame:
         root.bind("<Motion>", self.motion)
         root.bind("<MouseWheel>", self.wheel)
         root.bind("<FocusOut>", lambda ev: self.clear_held())
-        root.bind("<F11>", lambda ev: self.toggle_fullscreen())
         root.protocol("WM_DELETE_WINDOW", self.quit)
-        # On small screens the title bar and taskbar push the footer off-screen.
-        if root.winfo_screenwidth() < SW or root.winfo_screenheight() < SH + 80:
-            self.toggle_fullscreen()
         self.redraw()
         self.root.after(int(STEP_INTERVAL * 1000), self.update)
 
@@ -5031,9 +5048,10 @@ class BlackwellGame:
             "notes": sorted(self.notes),
             "witness_spoken": self.witness_spoken,
             "wrong_attempts": self.wrong_attempts,
+            "deduction_mistakes": sorted(self.deduction_mistakes),
+            "spotted_count": self.spotted_count,
             "disguise": self.disguise,
             "cover_blown": self.cover_blown,
-            "coins": self.coins,
             "infiltration_uncovered": self.infiltration_uncovered,
             "player": [int(self.player.x), int(self.player.y)],
             "room": self.room_index,
@@ -5091,12 +5109,11 @@ class BlackwellGame:
         self.solved = saved_ids("solved", 3)
         self.witness_spoken = bool(state.get("witness_spoken", False))
         self.wrong_attempts = as_int(state.get("wrong_attempts", 0))
+        self.deduction_mistakes = saved_ids("deduction_mistakes", 3)
+        self.spotted_count = as_int(state.get("spotted_count", 0))
         self.disguise = state.get("disguise") if state.get("disguise") in {"staff", "guest"} else None
         self.cover_blown = bool(state.get("cover_blown", False))
         self.scrutiny = 0.0
-        self.coins = clamp(as_int(state.get("coins", 3), 3), 0, 5)
-        self.decoy = None
-        self.decoy_expire = 0.0
         self.infiltration_uncovered = bool(state.get("infiltration_uncovered", False))
         self.secret_unlocked = bool(state.get("secret_unlocked", False))
         self.room_index = 0
@@ -5116,7 +5133,9 @@ class BlackwellGame:
         self.restricted_warning_at = -9.0
         self.peak_exposure = clamp(float(as_int(state.get("peak_exposure", 0))), 0.0, 100.0)
         x, y = self.world.start
-        self.player = Agent(float(x), float(y), coat=int(self.avatar["coat"]), hair=int(self.avatar["hair"]), skin=int(self.avatar["skin"]), hat=bool(self.avatar["hat"]), accessory=int(self.avatar["accessory"]))
+        self.player = Agent(float(x), float(y), coat=int(self.avatar["coat"]), hair=int(self.avatar["hair"]),
+                            skin=int(self.avatar["skin"]), hat=bool(self.avatar["hat"]),
+                            accessory=int(self.avatar["accessory"]))
         # Guards belong to the private wing; switch_room() creates them.
         self.watchmen = []
         self.exposure = 0.0
@@ -5135,7 +5154,6 @@ class BlackwellGame:
         self.cutscene_step = 0
         self.dialogue_step = 0
         self.confront_step = 0
-        self.focus = False
         self.clear_held()
         self.switch_room(target_room, arriving=True)
 
@@ -5206,7 +5224,7 @@ class BlackwellGame:
                 PatrolGuard(Agent(*self.world.patrol[0], "right", coat=1, hair=2, skin=0,
                                   hat=True, accessory=3), list(self.world.patrol), "security"),
                 PatrolGuard(Agent(418, 145, "left", coat=1, hair=2, skin=1,
-                                  hat=True, accessory=3), [(358,151),(468,151),(470,197),(359,197)], "enforcer"),
+                                  hat=True, accessory=3), [(358, 151), (468, 151), (470, 197), (359, 197)], "enforcer"),
             ]
             for g in self.watchmen:
                 g.actor.x, g.actor.y = find_nearest_open(self.world, g.actor.feet)
@@ -5262,25 +5280,25 @@ class BlackwellGame:
         self.canvas.create_rectangle(0, 0, SW, SH, fill="#06111b", outline="",
                                      tags="room_transition_fx")
         mx, my = SW // 2, SH // 2
-        self.canvas.create_rectangle(mx-263, my-213, mx+263, my+213,
+        self.canvas.create_rectangle(mx - 263, my - 213, mx + 263, my + 213,
                                      fill="#111b29", outline="#78624d", width=3,
                                      tags="room_transition_fx")
         for j in range(12):
-            yy=my-188+j*32
-            left=mx-181+j//3*5
-            right=mx+181-j//3*5
-            color = "#39414b" if (j+t*12)%3 < 1 else "#2c3540"
-            self.canvas.create_rectangle(left, yy, right, yy+28, fill=color,
+            yy = my - 188 + j * 32
+            left = mx - 181 + j // 3 * 5
+            right = mx + 181 - j // 3 * 5
+            color = "#39414b" if (j + t * 12) % 3 < 1 else "#2c3540"
+            self.canvas.create_rectangle(left, yy, right, yy + 28, fill=color,
                                          outline="#62707a", width=2, tags="room_transition_fx")
-            self.canvas.create_line(left+18, yy+5, right-18, yy+5, fill="#7a716c",
+            self.canvas.create_line(left + 18, yy + 5, right - 18, yy + 5, fill="#7a716c",
                                     tags="room_transition_fx")
-        py = my-159 + t*310 if self.transition_action == "descend" else my+143-t*305
-        px = mx+int(5*math.sin(self.time_alive*8))
-        self.canvas.create_oval(px-12, py-12, px+12, py+10, fill="#172331", outline="#9b7558",
+        py = my - 159 + t * 310 if self.transition_action == "descend" else my + 143 - t * 305
+        px = mx + int(5 * math.sin(self.time_alive * 8))
+        self.canvas.create_oval(px - 12, py - 12, px + 12, py + 10, fill="#172331", outline="#9b7558",
                                 tags="room_transition_fx")
-        self.canvas.create_rectangle(px-8,py-27,px+8,py-8,fill="#634654",outline="#211c26",
+        self.canvas.create_rectangle(px - 8, py - 27, px + 8, py - 8, fill="#634654", outline="#211c26",
                                      tags="room_transition_fx")
-        self.canvas.create_oval(px-7,py-43,px+7,py-25,fill="#d4aa8a",outline="#342d33",
+        self.canvas.create_oval(px - 7, py - 43, px + 7, py - 25, fill="#d4aa8a", outline="#342d33",
                                 tags="room_transition_fx")
         title = "THE HIDDEN WAY" if self.transition_action in {"descend", "ascend"} else "BEYOND THE DOOR"
         sub = (SECRET_FEATURES[self.chapter][2]
@@ -5296,7 +5314,8 @@ class BlackwellGame:
     def make_title(self):
         self.title_pil = TitleIllustration().render()
         scale = 2
-        doubled = self.title_pil.resize((self.title_pil.width * scale, self.title_pil.height * scale), Image.Resampling.NEAREST)
+        doubled = self.title_pil.resize((self.title_pil.width * scale, self.title_pil.height * scale),
+                                        Image.Resampling.NEAREST)
         self.title_photo = ImageTk.PhotoImage(doubled)
 
     def new_investigation(self):
@@ -5321,6 +5340,8 @@ class BlackwellGame:
             self.cache_progress()
         idx = self.chapter if chapter is None else int(chapter)
         self.prepare_chapter(idx, reset=new)
+        self.debug_score_override = False
+        self.report_score = None
         self.screen = "game"
         state = self.progress.get(str(idx))
         if new or not (isinstance(state, dict) and state.get("seen")):
@@ -5378,7 +5399,8 @@ class BlackwellGame:
         self.rect(x, y, x + w, y + h, fill, stroke, 2 if primary else 1)
         if primary:
             self.rect(x + 4, y + 4, x + w - 4, y + h - 4, fill, C["gold_dim"])
-        self.text(x + w / 2, y + h / 2, label, size, C["ivory"] if enabled else C["muted"], bold=primary, anchor="center")
+        self.text(x + w / 2, y + h / 2, label, size, C["ivory"] if enabled else C["muted"], bold=primary,
+                  anchor="center")
         if enabled:
             self.buttons.append(((x, y, x + w, y + h), callback))
 
@@ -5386,7 +5408,8 @@ class BlackwellGame:
         for j in range(count):
             col = color or C["gold"]
             if j < complete:
-                self.canvas.create_polygon(x + j * 28, y + 8, x + j * 28 + 7, y, x + j * 28 + 14, y + 8, x + j * 28 + 7, y + 16, fill=col, outline=C["gold_dim"])
+                self.canvas.create_polygon(x + j * 28, y + 8, x + j * 28 + 7, y, x + j * 28 + 14, y + 8, x + j * 28 + 7,
+                                           y + 16, fill=col, outline=C["gold_dim"])
             else:
                 self.canvas.create_oval(x + j * 28, y, x + j * 28 + 14, y + 14, outline=C["edge"])
 
@@ -5396,10 +5419,14 @@ class BlackwellGame:
 
     def moth(self, x, y, scale=1, color=None):
         color = color or C["gold"]
-        self.canvas.create_polygon(x, y, x - 11 * scale, y - 5 * scale, x - 10 * scale, y + 6 * scale, x, y + 4 * scale, fill=color)
-        self.canvas.create_polygon(x, y, x + 11 * scale, y - 5 * scale, x + 10 * scale, y + 6 * scale, x, y + 4 * scale, fill=color)
-        self.canvas.create_polygon(x, y + 4 * scale, x - 7 * scale, y + 10 * scale, x - 2 * scale, y + 11 * scale, fill=color)
-        self.canvas.create_polygon(x, y + 4 * scale, x + 7 * scale, y + 10 * scale, x + 2 * scale, y + 11 * scale, fill=color)
+        self.canvas.create_polygon(x, y, x - 11 * scale, y - 5 * scale, x - 10 * scale, y + 6 * scale, x, y + 4 * scale,
+                                   fill=color)
+        self.canvas.create_polygon(x, y, x + 11 * scale, y - 5 * scale, x + 10 * scale, y + 6 * scale, x, y + 4 * scale,
+                                   fill=color)
+        self.canvas.create_polygon(x, y + 4 * scale, x - 7 * scale, y + 10 * scale, x - 2 * scale, y + 11 * scale,
+                                   fill=color)
+        self.canvas.create_polygon(x, y + 4 * scale, x + 7 * scale, y + 10 * scale, x + 2 * scale, y + 11 * scale,
+                                   fill=color)
         self.line(x, y - 4 * scale, x, y + 10 * scale, fill=C["black"], width=max(1, scale))
 
     def draw_outer_frame(self, title="", subtitle=""):
@@ -5441,7 +5468,6 @@ class BlackwellGame:
         self.text(96, 310, "SHADOWS", 40, C["ivory"], serif=True, bold=True)
         self.line(98, 364, 450, 364, fill=C["gold"], width=2)
         self.text(100, 379, "Truth hides in the details.", 14, C["muted"])
-        self.text(100, 415, "Stuck in The Manor? Press N for a hint.", 12, C["gold"])
         self.button(96, 461, 310, 46, "CONTINUE", lambda: self.start_game(), primary=True)
         self.button(96, 521, 310, 44, "NEW INVESTIGATION", self.new_investigation)
         self.button(96, 578, 310, 44, "CHAPTER SELECT", lambda: self.open_screen("select"))
@@ -5486,10 +5512,12 @@ class BlackwellGame:
                     crop = ImageEnhance.Brightness(crop).enhance(.42)
                 self.thumbnails[idx] = ImageTk.PhotoImage(crop)
             self.canvas.create_image(x + 7, y + 8, image=self.thumbnails[idx], anchor="nw")
-            case_icon = ["moths", "ticket", "lock", "mask", "archive", "flower", "anchor", "globe", "scales", "candle"][idx]
+            case_icon = ["moths", "ticket", "lock", "mask", "archive", "flower", "anchor", "globe", "scales", "candle"][
+                idx]
             self.icon_draw(x + 196, y + 152, case_icon, zoom=2, dim=not allowed)
             self.text(x + 14, y + 158, f"CHAPTER {roman(idx)}", 11, C["cyan"] if allowed else C["muted"])
-            self.text(x + 14, y + 184, ch["title"], 17, C["ivory"] if allowed else C["muted"], serif=True, bold=True, width=234)
+            self.text(x + 14, y + 184, ch["title"], 17, C["ivory"] if allowed else C["muted"], serif=True, bold=True,
+                      width=234)
             self.text(x + 14, y + 233, ch["place"], 11, C["muted"], width=234)
             if allowed:
                 self.button(x + 13, y + 267, 232, 32, "OPEN CASE", lambda n=idx: self.start_game(n))
@@ -5507,7 +5535,8 @@ class BlackwellGame:
         self.text(80, 621, "Sometimes the face in the case file\nis the last thing anyone remembers.", 12, C["muted"])
         self.text(624, 149, "NAME", 12, C["gold"])
         if self.name_entry is None or not self.name_entry.winfo_exists():
-            self.name_entry = tk.Entry(self.root, bg="#142942", fg=C["ivory"], font=(self.font_small, 18), relief="flat", insertbackground=C["gold"])
+            self.name_entry = tk.Entry(self.root, bg="#142942", fg=C["ivory"], font=(self.font_small, 18),
+                                       relief="flat", insertbackground=C["gold"])
         if not self.name_entry_open:
             self.name_entry.delete(0, "end")
             self.name_entry.insert(0, self.avatar["name"])
@@ -5563,7 +5592,8 @@ class BlackwellGame:
         self.return_menu()
 
     def draw_help(self):
-        self.draw_outer_frame("HOW TO PLAY", "A less cluttered interface. The evidence is in the world, not under floating letters.")
+        self.draw_outer_frame("HOW TO PLAY",
+                              "A less cluttered interface. The evidence is in the world, not under floating letters.")
         self.frame_box(60, 119, 927, 766)
         self.frame_box(951, 119, 1380, 766)
         self.text(95, 150, "CONTROLS", 22, C["gold"], serif=True)
@@ -5577,14 +5607,11 @@ class BlackwellGame:
             ("H", "Enter or leave nearby concealment."),
             ("B", "Blend into a nearby small group if you move slowly."),
             ("E / COATSTAND", "Choose a staff or guest disguise for infiltration."),
-            ("V", "Hold to preview each guard's line-of-sight patrol."),
-            ("Q", "Toss a coin to draw a guard toward its sound."),
-            ("N", "Get a hint about the next clue in The Manor."),
             ("ESC", "Close an overlay or return to the title screen."),
             ("MOUSE", "Choose dialogue, evidence and destinations."),
         ]
         for j, (key, explanation) in enumerate(instruction_rows):
-            yy = 210 + j * 37
+            yy = 210 + j * 39
             self.text(99, yy, key, 12, C["cyan"])
             self.text(283, yy, explanation, 12, C["ivory"], width=565)
         self.text(978, 150, "THE MYSTERY", 21, C["gold"], serif=True)
@@ -5597,7 +5624,8 @@ class BlackwellGame:
             "evidence against plausible alternative explanations; clicking an unexplored clue proves nothing.", 37
         ), 13, C["ivory"], width=357)
         self.text(978, 557, wrapped(
-            "Inspect the public rooms without pressure. Navy-uniformed guards control the private offices. Watch their routes, wait for an opening, or wear staff clothing; experienced guards recognize strangers.", 37
+            "Inspect the public rooms without pressure. Navy-uniformed guards control the private offices. Watch their routes, wait for an opening, or wear staff clothing; experienced guards recognize strangers.",
+            37
         ), 13, C["ivory"], width=357)
         self.button(66, 802, 186, 40, "BACK", self.go_back)
 
@@ -5644,7 +5672,7 @@ class BlackwellGame:
         portal = self.portal_nearby()
         return (self.chapter, self.room_index, len(self.seen), len(self.solved),
                 self.witness_spoken, self.disguise, self.cover_blown,
-                self.coins, self.hidden, self.blending, self.crouched,
+                self.hidden, self.blending, self.crouched,
                 round(self.exposure / 5), bool(self.toast_timer), self.toast_text if self.toast_timer else "",
                 bool(self.alert_caption_timer), self.alert_caption if self.alert_caption_timer else "",
                 nearby[0] if nearby else None, portal[0] if portal else None,
@@ -5668,8 +5696,6 @@ class BlackwellGame:
             self._scene_emitters = {}
             self._world_alerts = {}
             self._world_sparkle = []
-            self._world_decoy = []
-            self._focus_was_active = False
             self._last_chrome_signature = None
             self.buttons.clear()
 
@@ -5797,7 +5823,7 @@ class BlackwellGame:
                 r = 4 + (math.sin(self.time_alive * 13 + entry[1] * .2) + 1) * 1.2
                 key = (entry[1], entry[2])
                 item = self._scene_emitters.get(key)
-                coords = (x-r, y-r*.7, x+r, y+r*.7)
+                coords = (x - r, y - r * .7, x + r, y + r * .7)
                 if item is None:
                     self._scene_emitters[key] = self.canvas.create_oval(
                         *coords, outline="#b78751", stipple="gray75", tags="world_render")
@@ -5825,43 +5851,14 @@ class BlackwellGame:
             x, y = self.world_to_screen(guard.actor.x, guard.actor.y)
             warning = "!" if mode == "pursue" else "?"
             if item is None:
-                item = self.canvas.create_text(x, y-104, text=warning,
-                       font=(self.font_small, 19, "bold"), fill=C["red"] if warning == "!" else C["gold"], tags="world_render")
+                item = self.canvas.create_text(x, y - 104, text=warning,
+                                               font=(self.font_small, 19, "bold"),
+                                               fill=C["red"] if warning == "!" else C["gold"], tags="world_render")
                 self._world_alerts[key] = item
             else:
-                self.canvas.coords(item, x, y-104)
+                self.canvas.coords(item, x, y - 104)
                 self.canvas.itemconfigure(item, text=warning,
-                       fill=C["red"] if warning == "!" else C["gold"], state="normal")
-
-        # Sightlines are optional; do not pay for them when the player is not
-        # holding V. Retain all non-focus objects through the next frame.
-        if self.focus:
-            self.canvas.delete("focus_fx")
-            for guard in self.watchmen:
-                self.draw_watchman_cone(guard)
-                route = [self.world_to_screen(*pt) for pt in guard.route]
-                for a, b in zip(route, route[1:] + route[:1]):
-                    self.canvas.create_line(*a, *b, fill="#657d94", dash=(2, 8),
-                                            tags=("world_render", "focus_fx"))
-            self._focus_was_active = True
-        elif self._focus_was_active:
-            self.canvas.delete("focus_fx")
-            self._focus_was_active = False
-
-        if self.decoy is not None and self.time_alive < self.decoy_expire:
-            x, y = self.world_to_screen(*self.decoy)
-            radius = 5 + 23 * max(0.0, 1 - (self.decoy_expire - self.time_alive) / 1.35)
-            if not self._world_decoy:
-                self._world_decoy = [
-                    self.canvas.create_oval(0,0,1,1, outline="#c9b478", dash=(3, 5), tags="world_render"),
-                    self.canvas.create_oval(0,0,1,1, fill="#d7c08a", outline="", tags="world_render")]
-            self.canvas.coords(self._world_decoy[0], x-radius, y-radius*.55, x+radius, y+radius*.55)
-            self.canvas.coords(self._world_decoy[1], x-3, y-2, x+3, y+2)
-            for item in self._world_decoy:
-                self.canvas.itemconfigure(item, state="normal")
-        elif self._world_decoy:
-            for item in self._world_decoy:
-                self.canvas.itemconfigure(item, state="hidden")
+                                          fill=C["red"] if warning == "!" else C["gold"], state="normal")
 
         near = self.nearest_object()
         visible = (near is not None and near[0].startswith("clue_") and
@@ -5873,11 +5870,11 @@ class BlackwellGame:
             size = 2 + abs(math.sin(self.time_alive * 3)) * 4
             if not self._world_sparkle:
                 self._world_sparkle = [
-                    self.canvas.create_line(x-size, y, x+size, y, fill=C["gold"], tags="world_render"),
-                    self.canvas.create_line(x, y-size, x, y+size, fill=C["gold"], tags="world_render")]
+                    self.canvas.create_line(x - size, y, x + size, y, fill=C["gold"], tags="world_render"),
+                    self.canvas.create_line(x, y - size, x, y + size, fill=C["gold"], tags="world_render")]
             else:
-                self.canvas.coords(self._world_sparkle[0], x-size, y, x+size, y)
-                self.canvas.coords(self._world_sparkle[1], x, y-size, x, y+size)
+                self.canvas.coords(self._world_sparkle[0], x - size, y, x + size, y)
+                self.canvas.coords(self._world_sparkle[1], x, y - size, x, y + size)
                 for item in self._world_sparkle:
                     self.canvas.itemconfigure(item, state="normal")
         elif self._world_sparkle:
@@ -5902,25 +5899,6 @@ class BlackwellGame:
         self.draw_game_footer(self.nearest_object())
         if self.toast_timer > 0:
             self.draw_toast()
-
-    def draw_watchman_cone(self, watchman):
-        """Sightline guides available on V: narrow, line-of-sight clipped rays."""
-        actor = watchman.actor
-        x, y = self.world_to_screen(actor.x, actor.y)
-        base = {"right": 0, "down": math.pi / 2, "left": math.pi,
-                "up": -math.pi / 2}.get(actor.facing, 0)
-        max_range = 98 if watchman.rank == "enforcer" else 91
-        for offset in (-.56, -.28, 0, .28, .56):
-            t = base + offset
-            last = actor.feet
-            for d in range(5, max_range, 5):
-                v = (actor.x + math.cos(t) * d, actor.y + math.sin(t) * d)
-                if self.obstructed(*v, radius=1):
-                    break
-                last = v
-            tx, ty = self.world_to_screen(*last)
-            self.canvas.create_line(x, y, tx, ty, fill="#b1a27c" if abs(offset) else "#dac28e",
-                                    dash=(3, 7), tags=("world_render", "focus_fx"))
 
     def draw_game_sidebar(self):
         x1, x2 = 1041, 1413
@@ -5959,7 +5937,6 @@ class BlackwellGame:
         short_identity = identity if len(identity) <= 20 else identity[:18] + "…"
         self.text(1075, 484, f"Cover: {short_identity}", 10,
                   C["red"] if self.cover_blown else C["cyan"], width=219)
-        self.text(1367, 484, f"{self.coins} coins", 10, C["gold"], anchor="ne")
         self.line(1070, 511, 1380, 511, fill=C["thin"])
         self.text(1071, 526, "CURRENT THREAD", 11, C["gold"])
         if self.room_index == 2:
@@ -5984,10 +5961,7 @@ class BlackwellGame:
         if portal is not None:
             near = (portal[0], portal[1], "E  " + portal[2])
         self.rect(26, 793, 1412, 875, C["midnight"], C["edge"])
-        controls = "WASD Move    CTRL Quiet walk    E Interact    Q Coin    V Sightlines"
-        if self.chapter == 0:
-            controls += "    N Hint"
-        self.text(45, 814, controls, 12, C["muted"])
+        self.text(45, 814, "WASD Move    CTRL Quiet walk    E Interact    J Journal    TAB Evidence", 12, C["muted"])
         if near:
             key, pos, display = near
             self.text(46, 844, f"{display}   •   E", 13, C["gold"])
@@ -6038,6 +6012,8 @@ class BlackwellGame:
             self.draw_caught()
         elif self.overlay == "pause":
             self.draw_pause()
+        elif self.overlay == "debug":
+            self.draw_debug_panel()
 
     def draw_cinematic(self):
         ch = CHAPTERS[self.chapter]
@@ -6099,10 +6075,14 @@ class BlackwellGame:
             found = idx in self.seen
             kind = EVIDENCE_SHAPES[self.chapter][idx]
             self.icon_draw(734, y - 3, kind, zoom=2, dim=not found)
-            self.text(798, y, name if found else "[Unexamined evidence]", 15, C["ink"] if found else "#887959", bold=found)
-            self.text(798, y + 32, wrapped(detail if found else "There is something here you have not yet studied closely enough to remember.", 50), 12, C["ink"] if found else "#8b795f", width=461)
+            self.text(798, y, name if found else "[Unexamined evidence]", 15, C["ink"] if found else "#887959",
+                      bold=found)
+            self.text(798, y + 32, wrapped(
+                detail if found else "There is something here you have not yet studied closely enough to remember.",
+                50), 12, C["ink"] if found else "#8b795f", width=461)
             self.line(732, y + 102, 1271, y + 102, fill="#b7a17e")
-        field_note = ("PRIVATE FILE: " + SECRET_REVEALS[self.chapter]) if self.infiltration_uncovered else             "A private office may contain evidence the others do not want remembered."
+        field_note = ("PRIVATE FILE: " + SECRET_REVEALS[
+            self.chapter]) if self.infiltration_uncovered else "A private office may contain evidence the others do not want remembered."
         self.text(738, 656, wrapped(field_note, 73), 11, "#775940", width=515)
 
     def draw_board(self):
@@ -6132,12 +6112,16 @@ class BlackwellGame:
             self.text(x + 22, 437, f"Supporting: {clue}", 12, "#7d5d43", width=300)
             self.text(x + 22, 478, "SUPPORTED" if solved else ("READY TO TEST" if found else "UNSUPPORTED"), 11,
                       "#35744c" if solved else "#7d5d43", bold=True)
-            self.button(x + 22, 510, 300, 32, "REVIEW" if solved else "FORM A DEDUCTION", lambda n=j: self.start_deduction(n), enabled=found, size=11)
+            self.button(x + 22, 510, 300, 32, "REVIEW" if solved else "FORM A DEDUCTION",
+                        lambda n=j: self.start_deduction(n), enabled=found, size=11)
         self.text(179, 615, "Every answer leaves a shadow. Follow the one the witnesses avoid.", 13, "#f0dbc2")
-        self.text(179, 652, f"CONCLUSIONS: {len(self.solved)}/3    WITNESS: {'RECORDED' if self.witness_spoken else 'NOT YET INTERVIEWED'}", 13, "#f0dbc2")
+        self.text(179, 652,
+                  f"CONCLUSIONS: {len(self.solved)}/3    WITNESS: {'RECORDED' if self.witness_spoken else 'NOT YET INTERVIEWED'}",
+                  13, "#f0dbc2")
 
     def ellipse_pin(self, x, y, solved):
-        self.canvas.create_oval(x - 9, y - 10, x + 9, y + 9, fill="#5d2a34" if not solved else "#4f6948", outline="#e1a67e")
+        self.canvas.create_oval(x - 9, y - 10, x + 9, y + 9, fill="#5d2a34" if not solved else "#4f6948",
+                                outline="#e1a67e")
         self.canvas.create_oval(x - 3, y - 4, x + 3, y + 2, fill="#bb7a6b" if not solved else "#bad09f", outline="")
 
     def start_deduction(self, idx):
@@ -6163,7 +6147,8 @@ class BlackwellGame:
         for j, option in enumerate(choices):
             yy = 449 + j * 88
             self.button(166, yy, 1075, 72, wrapped(option, 100), lambda k=j: self.answer_deduction(k), size=12)
-        self.text(166, 728, "Only a conclusion consistent with the physical evidence belongs in the case file.", 11, C["muted"])
+        self.text(166, 728, "Only a conclusion consistent with the physical evidence belongs in the case file.", 11,
+                  C["muted"])
 
     def deduction_options(self, idx):
         ch = CHAPTERS[self.chapter]
@@ -6183,6 +6168,7 @@ class BlackwellGame:
             self.toast("The pieces fit. Another false story falls away.")
         else:
             self.wrong_attempts += 1
+            self.deduction_mistakes.add(idx)
             # A mistaken theory is a reasoning error, not a noise event.
             self.toast("The evidence resists that explanation. Reconsider the details.")
         self.overlay = "deduce_result"
@@ -6203,7 +6189,8 @@ class BlackwellGame:
             body = "A detail in your evidence contradicts that interpretation. No progress has been recorded."
         self.text(167, 328, wrapped(body, 70), 19, C["ivory"], width=960)
         self.line(166, 501, 1249, 501, fill=C["edge"])
-        self.text(166, 532, "A theory can survive scrutiny, or collapse beneath a single detail.", 13, C["muted"], width=1000)
+        self.text(166, 532, "A theory can survive scrutiny, or collapse beneath a single detail.", 13, C["muted"],
+                  width=1000)
         self.button(995, 688, 215, 44, "RETURN TO BOARD", lambda: self.open_overlay("board"), primary=True)
 
     def draw_dialogue(self):
@@ -6213,15 +6200,16 @@ class BlackwellGame:
         self.frame_box(168, 207, 443, 575, fill="#172a40")
         speaker = d["speaker"]
         portrait = self.sprite_factory.photo(self.world.witness.coat,
-                                           self.world.witness.hair,
-                                           self.world.witness.skin,
-                                           "down", (self.tick_count // 5) % 6,
-                                           self.world.witness.hat, zoom=8)
+                                             self.world.witness.hair,
+                                             self.world.witness.skin,
+                                             "down", (self.tick_count // 5) % 6,
+                                             self.world.witness.hat, zoom=8)
         self.canvas.create_image(308, 266, image=portrait, anchor="n")
         self.frame_box(464, 207, 1223, 575, fill="#0c2036")
         self.text(493, 236, speaker, 21, C["gold"], serif=True)
         self.text(493, 311, wrapped(d["text"], 53), 18, C["ivory"], width=687)
-        self.text(492, 520, "Not every answer is reliable. The journal records what is said, not what is proved.", 11, C["cyan"], width=665)
+        self.text(492, 520, "Not every answer is reliable. The journal records what is said, not what is proved.", 11,
+                  C["cyan"], width=665)
         self.text(169, 680, "SPACE / ENTER  to continue", 12, C["cyan"])
         self.button(989, 674, 191, 44, "CONTINUE", self.advance_dialogue, primary=True)
 
@@ -6246,7 +6234,7 @@ class BlackwellGame:
         self.ui_modal(title="AN OBJECT THAT DOES NOT BELONG")
         self.frame_box(153, 183, 458, 646, fill="#173048")
         scene_crop = self.world_pil.crop((max(0, int(obj.x) - 30), max(0, int(obj.y) - 30),
-                                        min(WORLD_W, int(obj.x) + 30), min(WORLD_H, int(obj.y) + 30)))
+                                          min(WORLD_W, int(obj.x) + 30), min(WORLD_H, int(obj.y) + 30)))
         scaled = scene_crop.resize((250, 250), Image.Resampling.NEAREST)
         self.discovery_photo = ImageTk.PhotoImage(scaled)
         self.canvas.create_image(183, 230, image=self.discovery_photo, anchor="nw")
@@ -6290,7 +6278,8 @@ class BlackwellGame:
         else:
             self.button(190, 671, 350, 49, "END THE MURDERER", self.execute_finale, primary=True)
             self.button(570, 671, 255, 49, "WITHDRAW", self.close_overlay)
-        self.text(857, 575, "A complete case proves guilt. Evelyn's order to kill is a separate moral burden.", 11, C["muted"], width=340)
+        self.text(857, 575, "A complete case proves guilt. Evelyn's order to kill is a separate moral burden.", 11,
+                  C["muted"], width=340)
 
     def advance_confrontation(self):
         self.confront_step += 1
@@ -6301,35 +6290,222 @@ class BlackwellGame:
         self.unlocked = max(self.unlocked, min(9, self.chapter + 1))
         self.thumbnails.clear()
         self.finished = self.chapter == 9
-        # Graded on the most attention drawn across the whole chapter, not the
-        # (necessarily low) awareness at the moment of the confrontation.
-        peak = self.peak_exposure
-        self.end_grade = "GHOST" if peak < 15 else "SLEUTH" if peak < 50 else "SURVIVOR"
+        # The report uses information the game already tracks, plus the
+        # number of times the detective was caught during this chapter.
+        if self.debug_score_override:
+            self.report_score = int(clamp(self.debug_score, 0, 100))
+        else:
+            self.report_score = self.calculate_case_score()
+        self.end_grade = self.ranks(self.report_score)
         self.overlay = "chapter_end"
         self.save()
         self.redraw()
 
+    def calculate_case_score(self):
+        """Return a simple 0-100 score for the completed investigation."""
+        evidence_points = (len(self.seen) / 3) * 40
+        optional_found = sum(1 for note in self.notes if 0 <= note <= 2)
+        optional_points = (optional_found / 3) * 20
+        stealth_points = 20 if self.spotted_count == 0 else max(0, 20 - self.spotted_count * 5)
+        first_try = len(self.solved - self.deduction_mistakes)
+        deduction_points = (first_try / 3) * 20
+        return round(evidence_points + optional_points + stealth_points + deduction_points)
+
     def draw_chapter_end(self):
+        """Render a completed case as a clean, legible investigation dossier."""
         ch = CHAPTERS[self.chapter]
-        self.ui_modal(title=f"THE END OF CASE {roman(self.chapter)}")
-        self.moth(1074, 252, scale=4, color=C["gold"])
-        self.text(169, 226, "The lamp goes out.", 30, C["ivory"], serif=True)
-        self.text(169, 302, wrapped(ch["aftermath"], 77), 18, C["ivory"], width=852)
-        self.line(170, 488, 1247, 488, fill=C["edge"])
-        self.text(169, 515, "CASE ASSESSMENT", 13, C["gold"])
-        self.text(169, 550, f"{self.end_grade}  •  {len(self.seen)} pieces of evidence  •  {len(self.solved)} supported deductions", 15, C["cyan"])
-        after = SECRET_REVEALS[self.chapter] if self.infiltration_uncovered else "One of the room's private secrets remains buried behind the staff door."
-        self.text(169, 590, wrapped(after, 101), 12, C["muted"], width=1030)
+        self.ui_modal(title=f"CASE FILE  /  {roman(self.chapter)}")
+
+        paper = "#eee4ce"
+        pale = "#f7f0df"
+        ink = "#302b25"
+        muted = "#695f51"
+        red = "#973f39"
+        blue = "#3d5260"
+        rule = "#cabb9f"
+
+        # Paper and binding, with all rules kept outside the text areas.
+        self.rect(150, 180, 1290, 761, "#080e17", "#060910", 2)
+        self.rect(144, 174, 1284, 755, "#d4c19e", "#887858", 2)
+        self.rect(153, 183, 1275, 746, paper, "#b4a17e", 1)
+        self.rect(170, 199, 175, 730, "#b79462")
+
+        score = getattr(self, "report_score", self.calculate_case_score())
+        grade = getattr(self, "end_grade", self.ranks(score))
+        optional_found = sum(1 for note in self.notes if 0 <= note <= 2)
+        first_try = len(self.solved - self.deduction_mistakes)
+        evidence_points = round((len(self.seen) / 3) * 40)
+        optional_points = round((optional_found / 3) * 20)
+        stealth_points = 20 if self.spotted_count == 0 else max(0, 20 - self.spotted_count * 5)
+        deduction_points = round((first_try / 3) * 20)
+
+        # Editorial header.
+        self.text(195, 201, "BLACKWELL  /  DETECTIVE AGENCY", 11, muted, bold=True)
+        self.text(195, 224, "Final Investigation Report", 28, ink, serif=True, bold=True)
+        self.text(197, 268, f"FILE {self.chapter + 1:02d}     •     {ch['title'].upper()}", 11, red, bold=True)
+        self.rect(1042, 219, 1241, 280, pale, red, 2)
+        self.text(1141, 232, "CASE CLOSED", 15, red, bold=True, anchor="n")
+        self.text(1141, 257, "OFFICIAL RECORD", 9, muted, bold=True, anchor="n")
+        self.line(195, 300, 1239, 300, fill=rule, width=2)
+
+        # Three clearly separated details; suspect revealed only on case completion.
+        identity = [(198, "VICTIM", ch["victim"], 280),
+                    (521, "SCENE", ch["place"], 302),
+                    (875, "DETECTIVE", self.avatar["name"], 335)]
+        for x, label, value, width in identity:
+            self.text(x, 313, label, 9, muted, bold=True)
+            self.text(x, 336, value, 14, ink, serif=True, width=width)
+
+        # The culprit gets its own prominent, easy-to-find report entry.
+        self.rect(194, 377, 1238, 428, pale, rule, 1)
+        self.rect(194, 377, 200, 428, red)
+        self.text(218, 386, "CULPRIT IDENTIFIED", 10, red, bold=True)
+        self.text(218, 404, ch["culprit"], 16, ink, serif=True, bold=True)
+        self.text(1230, 398, "CONFIRMED", 10, red, bold=True, anchor="e")
+
+        # Ledger on the left. Narrow row dividers appear below—not behind—text.
+        self.text(198, 447, "INVESTIGATION BREAKDOWN", 12, ink, bold=True)
+        self.text(585, 449, "FOUND", 9, muted, bold=True, anchor="ne")
+        self.text(782, 449, "SCORE", 9, muted, bold=True, anchor="ne")
+        rows = [
+            ("Evidence recovered", f"{len(self.seen)} / 3", f"{evidence_points} / 40"),
+            ("Optional discoveries", f"{optional_found} / 3", f"{optional_points} / 20"),
+            ("Times detected", str(self.spotted_count), f"{stealth_points} / 20"),
+            ("First-try deductions", f"{first_try} / 3", f"{deduction_points} / 20"),
+        ]
+        for i, (label, result, points) in enumerate(rows):
+            y = 477 + i * 37
+            if i % 2 == 0:
+                self.rect(194, y - 3, 791, y + 30, pale)
+            self.text(204, y + 2, label, 11, ink)
+            self.text(585, y + 2, result, 11, blue, bold=True, anchor="ne")
+            self.text(782, y + 2, points, 11, ink, bold=True, anchor="ne")
+        self.text(200, 629, f"Incorrect theories: {self.wrong_attempts}", 10, muted)
+
+        # Summary card and centered grade medallion.
+        self.line(814, 448, 814, 649, fill=rule, width=2)
+        self.text(841, 448, "FINAL ASSESSMENT", 12, ink, bold=True)
+        self.text(842, 475, "TOTAL POINTS", 9, muted, bold=True)
+        self.text(841, 492, str(score), 36, ink, serif=True, bold=True)
+        self.text(934, 525, "/ 100", 11, muted)
+        cx, cy, radius = 1122, 550, 63
+        self.canvas.create_oval(cx-radius, cy-radius, cx+radius, cy+radius,
+                                outline=red, width=3, fill=pale)
+        self.canvas.create_oval(cx-radius+7, cy-radius+7, cx+radius-7, cy+radius-7,
+                                outline="#c28b7d", width=1)
+        self.text(cx, cy-8, grade, 53, red, serif=True, bold=True, anchor="center")
+        self.text(cx, cy+38, "RANK", 9, red, bold=True, anchor="center")
+        comments = {
+            "S": "Outstanding investigation.",
+            "A": "Excellent detective work.",
+            "B": "A solid case, with some gaps.",
+            "C": "The truth found; details missed.",
+            "D": "Case closed; questions remain.",
+        }
+        self.text(842, 604, comments.get(grade, "Report filed."), 10, muted, width=235)
+
+        # Dedicated, roomy notes block. Long text wraps within the paper.
+        self.rect(194, 662, 1238, 731, pale, rule, 1)
+        self.text(209, 673, "CASE NOTES", 10, red, bold=True)
+        self.text(336, 672, ch["aftermath"], 10, ink, width=874)
+
         label = "RETURN TO TITLE" if self.chapter == 9 else "NEXT CHAPTER"
-        self.button(168, 681, 295, 45, label, self.next_chapter, primary=True)
-        self.button(497, 681, 258, 45, "CHAPTER SELECT", self.chapter_select)
+        self.button(173, 786, 280, 42, label, self.next_chapter, primary=True, size=11)
+        self.button(472, 786, 245, 42, "CHAPTER SELECT", self.chapter_select, size=11)
 
     def draw_caught(self):
         self.ui_modal(title="A LAMP TURNS TOWARD YOU")
         self.text(165, 241, "They have seen you.", 29, C["red"], serif=True)
-        self.text(165, 320, "The watchman has a long memory and a shorter temper. He forces you back toward the entrance.", 17, C["ivory"], width=850)
-        self.text(165, 421, "Your notes, clues and deductions remain intact. Your position—and your cover—do not.", 14, C["cyan"], width=880)
+        self.text(165, 320,
+                  "The watchman has a long memory and a shorter temper. He forces you back toward the entrance.", 17,
+                  C["ivory"], width=850)
+        self.text(165, 421, "Your notes, clues and deductions remain intact. Your position—and your cover—do not.", 14,
+                  C["cyan"], width=880)
         self.button(925, 686, 270, 44, "RE-ENTER THE ROOM", self.reset_after_capture, primary=True)
+
+    def open_debug(self):
+        """Open developer tools using the backslash keyboard shortcut."""
+        if self.screen in {"menu", "profile", "select", "help"}:
+            self.cache_progress()
+        self.debug_return_screen = self.screen
+        self.debug_return_overlay = self.overlay
+        self.debug_target_chapter = self.chapter
+        if self.screen == "game" and self.overlay == "chapter_end":
+            current = getattr(self, "report_score", None)
+        else:
+            current = self.calculate_case_score()
+        if current is None:
+            current = self.calculate_case_score()
+        self.debug_score = int(clamp(current, 0, 100))
+        if self.screen == "game":
+            self.overlay = "debug"
+        else:
+            self.screen = "debug"
+            self.overlay = None
+        self.redraw()
+
+    def close_debug(self):
+        """Return to the exact menu or game overlay from which debug was opened."""
+        if self.debug_return_screen == "game":
+            self.screen = "game"
+            self.overlay = self.debug_return_overlay
+        else:
+            self.screen = self.debug_return_screen
+            self.overlay = None
+        self.redraw()
+
+    def change_debug_chapter(self, amount):
+        self.debug_target_chapter = int(clamp(self.debug_target_chapter + amount, 0, 9))
+        self.redraw()
+
+    def change_debug_score(self, amount):
+        self.debug_score = int(clamp(self.debug_score + amount, 0, 100))
+        self.redraw()
+
+    def debug_set_score(self, score):
+        self.debug_score = int(clamp(score, 0, 100))
+        self.redraw()
+
+    def debug_jump_to_chapter(self):
+        # Debug jumps intentionally unlock the selected chapter for testing.
+        target = int(clamp(self.debug_target_chapter, 0, 9))
+        self.unlocked = max(self.unlocked, target)
+        self.start_game(target)
+
+    def debug_skip_to_report(self):
+        if self.screen != "game":
+            return
+        self.debug_score_override = True
+        self.report_score = int(clamp(self.debug_score, 0, 100))
+        self.end_grade = self.ranks(self.report_score)
+        self.execute_finale()
+
+    def draw_debug_panel(self):
+        self.ui_modal(title="DEVELOPER TEST PANEL")
+        self.text(180, 220, "CHAPTER JUMP", 14, C["gold"])
+        self.text(180, 260, f"CHAPTER {roman(self.debug_target_chapter)} — {CHAPTERS[self.debug_target_chapter]['title']}",
+                  20, C["ivory"], serif=True)
+        self.button(180, 310, 70, 42, "−", lambda: self.change_debug_chapter(-1), size=20)
+        self.button(264, 310, 70, 42, "+", lambda: self.change_debug_chapter(1), size=20)
+        self.button(354, 310, 300, 42, "JUMP TO SELECTED CHAPTER", self.debug_jump_to_chapter, primary=True,
+                    size=11)
+
+        self.text(180, 400, "TEST SCORE", 14, C["gold"])
+        self.text(180, 438, f"{self.debug_score:03d} / 100", 28, C["ivory"], serif=True)
+        self.text(180, 468, f"RANK PREVIEW: {self.ranks(self.debug_score)}", 12, C["cyan"], bold=True)
+        self.button(180, 505, 62, 42, "−10", lambda: self.change_debug_score(-10))
+        self.button(252, 505, 62, 42, "−1", lambda: self.change_debug_score(-1))
+        self.button(324, 505, 62, 42, "+1", lambda: self.change_debug_score(1))
+        self.button(396, 505, 62, 42, "+10", lambda: self.change_debug_score(10))
+        self.button(468, 505, 82, 42, "0", lambda: self.debug_set_score(0))
+        self.button(560, 505, 94, 42, "100", lambda: self.debug_set_score(100))
+        self.text(180, 568, "The selected score is used when you skip a chapter to its case report.",
+                  11, C["muted"], width=650)
+
+        if self.debug_return_screen == "game":
+            self.button(180, 635, 330, 48, "SKIP CURRENT CHAPTER TO REPORT", self.debug_skip_to_report,
+                        primary=True, size=11)
+        self.button(1040, 635, 170, 48, "CLOSE", self.close_debug)
 
     def draw_pause(self):
         self.ui_modal(title="THE INVESTIGATION PAUSES")
@@ -6353,6 +6529,12 @@ class BlackwellGame:
 
     def go_back(self):
         """One obvious, consistent route to the previous context."""
+        if self.screen == "debug":
+            self.close_debug()
+            return
+        if self.overlay == "debug":
+            self.close_debug()
+            return
         if self.overlay == "room_transition":
             return
         if self.screen == "game":
@@ -6444,7 +6626,8 @@ class BlackwellGame:
         for j, (x, y, radius) in enumerate(self.world.blend_zones):
             dd = distance(here, (x, y))
             if dd <= radius:
-                possibilities.append((dd + 13, f"blend_{j}", (x, y), "Leave the conversation" if self.blending else "Blend into the conversation"))
+                possibilities.append((dd + 13, f"blend_{j}", (x, y),
+                                      "Leave the conversation" if self.blending else "Blend into the conversation"))
         if not possibilities:
             return None
         possibilities.sort(key=lambda item: item[0])
@@ -6528,10 +6711,13 @@ class BlackwellGame:
         staff, guest = COVER_IDENTITIES[self.chapter]
         self.text(552, 220, "CHOOSE A COVER", 22, C["ivory"], serif=True)
         self.text(552, 278, staff, 17, C["gold"], serif=True)
-        self.text(552, 310, "Allows entry to staff rooms, but senior guards recognize unfamiliar faces. Avoid close inspection.", 13, C["muted"], width=616)
+        self.text(552, 310,
+                  "Allows entry to staff rooms, but senior guards recognize unfamiliar faces. Avoid close inspection.",
+                  13, C["muted"], width=616)
         self.button(555, 368, 275, 42, "WEAR STAFF UNIFORM", lambda: self.equip_disguise("staff"), primary=True)
         self.text(552, 451, guest, 17, C["gold"], serif=True)
-        self.text(552, 485, "Believable among guests and witnesses. It does not grant staff access.", 13, C["muted"], width=616)
+        self.text(552, 485, "Believable among guests and witnesses. It does not grant staff access.", 13, C["muted"],
+                  width=616)
         self.button(555, 544, 275, 42, "CHANGE INTO GUEST", lambda: self.equip_disguise("guest"))
         self.button(856, 544, 264, 42, "RETURN TO YOUR CLOTHES", lambda: self.equip_disguise(None))
         self.text(166, 679, "The uniform helps only while your cover remains believable.", 12, C["cyan"])
@@ -6559,26 +6745,6 @@ class BlackwellGame:
 
     def authorized_in_office(self):
         return self.disguise == "staff" and not self.cover_blown
-
-    def try_drop_coin(self):
-        if self.coins <= 0:
-            self.toast("Your pockets are empty. Distraction is no longer an option.")
-            return
-        direction = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}[self.player.facing]
-        target = (clamp(self.player.x + direction[0] * 56, 28, WORLD_W - 28),
-                  clamp(self.player.y + direction[1] * 56, 43, WORLD_H - 25))
-        self.coins -= 1
-        self.decoy = target
-        self.decoy_expire = self.time_alive + 1.35
-        for g in self.watchmen:
-            if distance(g.actor.feet, target) < 130:
-                g.last_known = target
-                g.mode = "investigate"
-                g.linger = 4.0
-                g.notice = min(100, g.notice + 8)
-        self.show_caption(DECOY_LINES[self.chapter])
-        self.save()
-        self.redraw()
 
     def update_cover(self, dt):
         if self.disguise is None or self.cover_blown:
@@ -6695,7 +6861,8 @@ class BlackwellGame:
         if self.restricted(self.player.x, self.player.y) and not self.authorized_in_office():
             if self.time_alive - self.restricted_warning_at > 7.0:
                 self.restricted_warning_at = self.time_alive
-                self.show_caption("The staff office is restricted. You can enter, but security will challenge an unknown face.")
+                self.show_caption(
+                    "The staff office is restricted. You can enter, but security will challenge an unknown face.")
         if self.restricted(self.player.x, self.player.y) and not self.infiltration_uncovered:
             if (self.disguise == "staff" and not self.cover_blown) or self.hidden or self.exposure < 30:
                 self.infiltration_uncovered = True
@@ -6882,6 +7049,9 @@ class BlackwellGame:
             self.exposure = 100.0
         self.peak_exposure = max(self.peak_exposure, self.exposure)
         if self.exposure >= 100:
+            if self.overlay != "caught":
+                self.spotted_count += 1
+                self.save()
             self.overlay = "caught"
             self.click_destination = None
             self.clear_held()
@@ -6931,6 +7101,13 @@ class BlackwellGame:
             if k == "return":
                 self.confirm_profile()
             return
+        # Backslash opens/closes developer tools from any non-text-entry screen.
+        if k in {"backslash", "bar"} or event.char == "\\":
+            if self.screen == "debug" or (self.screen == "game" and self.overlay == "debug"):
+                self.close_debug()
+            else:
+                self.open_debug()
+            return
         if self.screen == "game" and self.overlay is None:
             if k in {"w", "a", "s", "d", "up", "down", "left", "right", "control_l", "control_r"}:
                 self.held.add(k)
@@ -6945,17 +7122,13 @@ class BlackwellGame:
                 self.toggle_hide()
             elif k == "b":
                 self.toggle_blend()
-            elif k == "v": #Woody's ppr
-                self.focus = True
-            elif k == "q":
-                self.try_drop_coin()
-            elif k== "n":
-                if self.chapter ==0:
-                    self.show_caption(get_hint(self.seen))    
+            elif k == "n":
+                if self.chapter == 0:
+                    self.show_caption(get_hint(self.seen))
             elif k == "escape":
                 self.go_back()
             elif k == "space":
-                self.interact() #Woodys ppr end
+                self.interact()  # Woodys ppr end
         elif self.screen == "game" and self.overlay is not None:
             if k == "escape":
                 self.go_back()
@@ -6977,27 +7150,19 @@ class BlackwellGame:
 
     def key_up(self, event):
         k = event.keysym.lower()
-        if k == "v":
-            self.focus = False
-        # Windows/Linux OS key repeat fires Release/Press pairs between actual
+            # Windows/Linux OS key repeat fires Release/Press pairs between actual
         # releases; a small grace period avoids stuttering while keys are held.
         if k in self.held:
             def remove(key=k):
                 self.held.discard(key)
                 self.release_jobs.pop(key, None)
+
             self.release_jobs[k] = self.root.after(35, remove)
 
-    def toggle_fullscreen(self):
-        self.root.attributes("-fullscreen", not self.root.attributes("-fullscreen"))
-
     def motion(self, event):
-        if event.widget is self.root:
-            return  # The black fullscreen border is not part of the canvas.
         self.mouse = (event.x, event.y)
 
     def click(self, event):
-        if event.widget is self.root:
-            return
         xy = (event.x, event.y)
         for (x1, y1, x2, y2), callback in reversed(self.buttons):
             if x1 <= xy[0] <= x2 and y1 <= xy[1] <= y2:
@@ -7100,6 +7265,20 @@ class BlackwellGame:
                 self.draw_profile()
             elif self.screen == "help":
                 self.draw_help()
+            elif self.screen == "debug":
+                self.draw_debug_panel()
+
+# Jack's ppr
+    def ranks(self, score):
+        if score >= 95:
+            return "S"
+        if score >= 85:
+            return "A"
+        if score >= 70:
+            return "B"
+        if score >= 55:
+            return "C"
+        return "D"
 
 
 def main():
@@ -7110,3 +7289,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
