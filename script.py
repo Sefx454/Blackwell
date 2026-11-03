@@ -29,7 +29,7 @@ except ImportError as exc:
         "Install it with: python3 -m pip install pillow"
     ) from exc
 
-VERSION = "17"
+VERSION = "18"
 SW, SH = 1440, 900
 VIEW_X, VIEW_Y = 27, 89
 VIEW_W, VIEW_H = 996, 690
@@ -1844,6 +1844,18 @@ COVER_LINES = [
     "The caretaker knows where every crypt key belongs; the mourners know only where to stand.",
 ]
 
+DECOY_LINES = [
+    "A coin strikes the marble. The watchman turns toward the sound rather than your footprints.",
+    "The metallic clink disappears under a hiss of steam. The guard breaks formation to investigate.",
+    "A coin rings against the bellhop's trolley. Footsteps hurry toward the wrong corridor.",
+    "A tiny sound in the darkened wings draws the stage guard away from the curtain.",
+    "An echo skips across the tiled archive. Someone searches the shelves you have already left.",
+    "The sound travels through glass and leaf. A watchman enters the wrong garden path.",
+    "A coin taps the dock planks. The watchman mistakes it for a loose mooring ring.",
+    "The dome amplifies the small metallic sound. The director's guard turns to investigate.",
+    "A clink against an iron rail sends the bailiff toward the old evidence room.",
+    "The coin falls into the stone silence. The caretaker looks toward the wrong tomb.",
+]
 
 RESTRICTED_ZONE = (370, 86, 515, 184)
 
@@ -4955,9 +4967,13 @@ class BlackwellGame:
         self.blending = False
         self.crouched = False
         self.running = False
+        self.focus = False
         self.disguise = None  # None / "staff" / "guest"
         self.cover_blown = False
         self.scrutiny = 0.0
+        self.coins = 3
+        self.decoy = None
+        self.decoy_expire = 0.0
         self.infiltration_uncovered = False
         self.restricted_warning_at = -9.0
         self.cam_x = 0.0
@@ -4987,6 +5003,8 @@ class BlackwellGame:
         self._scene_emitters = {}
         self._world_alerts = {}
         self._world_sparkle = []
+        self._world_decoy = []
+        self._focus_was_active = False
         self.last_tick = time.perf_counter()
         self.cutscene_step = 0
         self.dialogue_step = 0
@@ -5052,6 +5070,7 @@ class BlackwellGame:
             "spotted_count": self.spotted_count,
             "disguise": self.disguise,
             "cover_blown": self.cover_blown,
+            "coins": self.coins,
             "infiltration_uncovered": self.infiltration_uncovered,
             "player": [int(self.player.x), int(self.player.y)],
             "room": self.room_index,
@@ -5114,6 +5133,9 @@ class BlackwellGame:
         self.disguise = state.get("disguise") if state.get("disguise") in {"staff", "guest"} else None
         self.cover_blown = bool(state.get("cover_blown", False))
         self.scrutiny = 0.0
+        self.coins = clamp(as_int(state.get("coins", 3), 3), 0, 5)
+        self.decoy = None
+        self.decoy_expire = 0.0
         self.infiltration_uncovered = bool(state.get("infiltration_uncovered", False))
         self.secret_unlocked = bool(state.get("secret_unlocked", False))
         self.room_index = 0
@@ -5154,6 +5176,7 @@ class BlackwellGame:
         self.cutscene_step = 0
         self.dialogue_step = 0
         self.confront_step = 0
+        self.focus = False
         self.clear_held()
         self.switch_room(target_room, arriving=True)
 
@@ -5607,6 +5630,8 @@ class BlackwellGame:
             ("H", "Enter or leave nearby concealment."),
             ("B", "Blend into a nearby small group if you move slowly."),
             ("E / COATSTAND", "Choose a staff or guest disguise for infiltration."),
+            ("V", "Hold to preview each guard's line-of-sight patrol."),
+            ("Q", "Toss a coin to draw a guard toward its sound."),
             ("ESC", "Close an overlay or return to the title screen."),
             ("MOUSE", "Choose dialogue, evidence and destinations."),
         ]
@@ -5672,7 +5697,7 @@ class BlackwellGame:
         portal = self.portal_nearby()
         return (self.chapter, self.room_index, len(self.seen), len(self.solved),
                 self.witness_spoken, self.disguise, self.cover_blown,
-                self.hidden, self.blending, self.crouched,
+                self.coins, self.hidden, self.blending, self.crouched,
                 round(self.exposure / 5), bool(self.toast_timer), self.toast_text if self.toast_timer else "",
                 bool(self.alert_caption_timer), self.alert_caption if self.alert_caption_timer else "",
                 nearby[0] if nearby else None, portal[0] if portal else None,
@@ -5696,6 +5721,8 @@ class BlackwellGame:
             self._scene_emitters = {}
             self._world_alerts = {}
             self._world_sparkle = []
+            self._world_decoy = []
+            self._focus_was_active = False
             self._last_chrome_signature = None
             self.buttons.clear()
 
@@ -5860,6 +5887,36 @@ class BlackwellGame:
                 self.canvas.itemconfigure(item, text=warning,
                                           fill=C["red"] if warning == "!" else C["gold"], state="normal")
 
+        # Sightlines are optional; do not pay for them when the player is not
+        # holding V. Retain all non-focus objects through the next frame.
+        if self.focus:
+            self.canvas.delete("focus_fx")
+            for guard in self.watchmen:
+                self.draw_watchman_cone(guard)
+                route = [self.world_to_screen(*pt) for pt in guard.route]
+                for a, b in zip(route, route[1:] + route[:1]):
+                    self.canvas.create_line(*a, *b, fill="#657d94", dash=(2, 8),
+                                            tags=("world_render", "focus_fx"))
+            self._focus_was_active = True
+        elif self._focus_was_active:
+            self.canvas.delete("focus_fx")
+            self._focus_was_active = False
+
+        if self.decoy is not None and self.time_alive < self.decoy_expire:
+            x, y = self.world_to_screen(*self.decoy)
+            radius = 5 + 23 * max(0.0, 1 - (self.decoy_expire - self.time_alive) / 1.35)
+            if not self._world_decoy:
+                self._world_decoy = [
+                    self.canvas.create_oval(0, 0, 1, 1, outline="#c9b478", dash=(3, 5), tags="world_render"),
+                    self.canvas.create_oval(0, 0, 1, 1, fill="#d7c08a", outline="", tags="world_render")]
+            self.canvas.coords(self._world_decoy[0], x - radius, y - radius * .55, x + radius, y + radius * .55)
+            self.canvas.coords(self._world_decoy[1], x - 3, y - 2, x + 3, y + 2)
+            for item in self._world_decoy:
+                self.canvas.itemconfigure(item, state="normal")
+        elif self._world_decoy:
+            for item in self._world_decoy:
+                self.canvas.itemconfigure(item, state="hidden")
+
         near = self.nearest_object()
         visible = (near is not None and near[0].startswith("clue_") and
                    int(near[0][5:]) not in self.seen and
@@ -5900,6 +5957,25 @@ class BlackwellGame:
         if self.toast_timer > 0:
             self.draw_toast()
 
+    def draw_watchman_cone(self, watchman):
+        """Sightline guides available on V: narrow, line-of-sight clipped rays."""
+        actor = watchman.actor
+        x, y = self.world_to_screen(actor.x, actor.y)
+        base = {"right": 0, "down": math.pi / 2, "left": math.pi,
+                "up": -math.pi / 2}.get(actor.facing, 0)
+        max_range = 98 if watchman.rank == "enforcer" else 91
+        for offset in (-.56, -.28, 0, .28, .56):
+            t = base + offset
+            last = actor.feet
+            for d in range(5, max_range, 5):
+                v = (actor.x + math.cos(t) * d, actor.y + math.sin(t) * d)
+                if self.obstructed(*v, radius=1):
+                    break
+                last = v
+            tx, ty = self.world_to_screen(*last)
+            self.canvas.create_line(x, y, tx, ty, fill="#b1a27c" if abs(offset) else "#dac28e",
+                                    dash=(3, 7), tags=("world_render", "focus_fx"))
+
     def draw_game_sidebar(self):
         x1, x2 = 1041, 1413
         self.frame_box(x1, 103, x2, 780, fill=C["panel"])
@@ -5937,6 +6013,7 @@ class BlackwellGame:
         short_identity = identity if len(identity) <= 20 else identity[:18] + "…"
         self.text(1075, 484, f"Cover: {short_identity}", 10,
                   C["red"] if self.cover_blown else C["cyan"], width=219)
+        self.text(1367, 484, f"DISTRACTIONS  {self.coins}", 10, C["muted"], anchor="ne")
         self.line(1070, 511, 1380, 511, fill=C["thin"])
         self.text(1071, 526, "CURRENT THREAD", 11, C["gold"])
         if self.room_index == 2:
@@ -5961,7 +6038,7 @@ class BlackwellGame:
         if portal is not None:
             near = (portal[0], portal[1], "E  " + portal[2])
         self.rect(26, 793, 1412, 875, C["midnight"], C["edge"])
-        self.text(45, 814, "WASD Move    CTRL Quiet walk    E Interact    J Journal    TAB Evidence", 12, C["muted"])
+        self.text(45, 814, "WASD Move    CTRL Quiet walk    E Interact    Q Coin    V Sightlines", 12, C["muted"])
         if near:
             key, pos, display = near
             self.text(46, 844, f"{display}   •   E", 13, C["gold"])
@@ -6746,6 +6823,26 @@ class BlackwellGame:
     def authorized_in_office(self):
         return self.disguise == "staff" and not self.cover_blown
 
+    def try_drop_coin(self):
+        if self.coins <= 0:
+            self.toast("Your pockets are empty. Distraction is no longer an option.")
+            return
+        direction = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}[self.player.facing]
+        target = (clamp(self.player.x + direction[0] * 56, 28, WORLD_W - 28),
+                  clamp(self.player.y + direction[1] * 56, 43, WORLD_H - 25))
+        self.coins -= 1
+        self.decoy = target
+        self.decoy_expire = self.time_alive + 1.35
+        for g in self.watchmen:
+            if distance(g.actor.feet, target) < 130:
+                g.last_known = target
+                g.mode = "investigate"
+                g.linger = 4.0
+                g.notice = min(100, g.notice + 8)
+        self.show_caption(DECOY_LINES[self.chapter])
+        self.save()
+        self.redraw()
+
     def update_cover(self, dt):
         if self.disguise is None or self.cover_blown:
             self.scrutiny = max(0, self.scrutiny - dt * 20)
@@ -7122,6 +7219,10 @@ class BlackwellGame:
                 self.toggle_hide()
             elif k == "b":
                 self.toggle_blend()
+            elif k == "v":  # Woody's ppr
+                self.focus = True
+            elif k == "q":
+                self.try_drop_coin()
             elif k == "n":
                 if self.chapter == 0:
                     self.show_caption(get_hint(self.seen))
@@ -7150,7 +7251,9 @@ class BlackwellGame:
 
     def key_up(self, event):
         k = event.keysym.lower()
-            # Windows/Linux OS key repeat fires Release/Press pairs between actual
+        if k == "v":
+            self.focus = False
+        # Windows/Linux OS key repeat fires Release/Press pairs between actual
         # releases; a small grace period avoids stuttering while keys are held.
         if k in self.held:
             def remove(key=k):
